@@ -46,38 +46,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* --- INTRO / SCANNER LOGIC --- */
 
-/* --- FILE: short/Client/client.js --- */
-
-function toggleScanView() {
-    const mainView = document.getElementById('intro-main-view');
-    const scanView = document.getElementById('intro-scan-view');
-    const headerArea = document.getElementById('intro-header-area'); 
-    
-    // Kiểm tra xem đang ở màn hình nào để switch
-    if(mainView.style.display === 'none') {
-        // [TRƯỜNG HỢP]: Quay lại màn hình chính (Back)
-        
-        if(headerArea) headerArea.classList.remove('hidden-none'); // Hiện lại Header
-        if(mainView) mainView.style.display = 'block'; // Hiện lại nút Connect to Registry
-        
-        if(scanView) {
-            scanView.style.display = 'none';
-            scanView.classList.add('hidden-none'); // Thêm lại class ẩn cho chắc chắn
-        }
-    } else {
-        // [TRƯỜNG HỢP]: Chuyển sang màn hình Scan (Connect & Discover)
-        
-        if(headerArea) headerArea.classList.add('hidden-none'); // Ẩn Header Logo
-        if(mainView) mainView.style.display = 'none'; // Ẩn nút to
-        
-        if(scanView) {
-            // --- [QUAN TRỌNG] SỬA LỖI TẠI ĐÂY ---
-            // Phải gỡ bỏ class có chứa !important trước thì style.display mới có tác dụng
-            scanView.classList.remove('hidden-none'); 
-            scanView.style.display = 'flex';
-        }
-    }
-}
 function loadHistory() {
     try {
         const raw = localStorage.getItem("auralink_history");
@@ -135,12 +103,40 @@ function connectToTarget(ip) {
 
 /* --- REGISTRY & DISCOVERY LOGIC --- */
 
+// [CẬP NHẬT] Hàm xử lý nút Connect & Scan
 function handleIntroScan() {
     const registryIP = "127.0.0.1";
     localStorage.setItem("auralink_registry_ip", registryIP);
     
-    toggleScanView(); 
+    // 1. Hiệu ứng UI khi bấm nút
+    const btn = document.getElementById("btnConnectRegistry");
+    const statusText = document.getElementById('scan-status-text');
+    const listDiv = document.getElementById('scan-results');
+
+    if(btn) {
+        // Đổi nút thành trạng thái đang tải
+        btn.innerHTML = `<i data-lucide="loader-2" class="spinning"></i> Scanning...`;
+        btn.disabled = true; // Chặn bấm liên tục
+        btn.style.opacity = "0.8";
+    }
+
+    if(statusText) statusText.innerText = "Connecting to Registry...";
+    if(listDiv) listDiv.innerHTML = `<div class="scan-placeholder"><i data-lucide="loader" class="spinning" style="opacity:0.5"></i></div>`;
+    if(typeof lucide !== 'undefined') lucide.createIcons();
+
+    // 2. Không cần toggleScanView() nữa vì đã gộp trang
+    // Gọi hàm kết nối
     connectToRegistryServer(registryIP);
+    
+    // 3. Set timeout để reset nút sau 2s (tránh trường hợp server ko phản hồi mà nút cứ quay mãi)
+    setTimeout(() => {
+        if(btn) {
+            btn.innerHTML = `<i data-lucide="refresh-cw"></i> Refresh List`;
+            btn.disabled = false;
+            btn.style.opacity = "1";
+            if(typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }, 2000);
 }
 
 function connectToRegistryServer(ip) {
@@ -193,8 +189,16 @@ function renderDiscoveredList(data) {
     const victims = parts.slice(1); 
 
     const statusText = document.getElementById('scan-status-text');
-    if(statusText) statusText.innerText = `Found ${victims.length} active client(s).`;
-
+    // Cập nhật dòng status text
+    if(statusText) {
+        if (victims.length > 0 && victims[0] !== "") {
+            statusText.innerText = `Found ${victims.length} active device(s).`;
+            statusText.style.color = "#34d399"; // Màu xanh lá
+        } else {
+            statusText.innerText = "No devices found via Registry.";
+            statusText.style.color = "#fb7185"; // Màu đỏ nhạt
+        }
+    }
     if (victims.length === 0 || (victims.length === 1 && victims[0] === "")) {
         list.innerHTML = `
             <div class="scan-placeholder">
@@ -463,10 +467,10 @@ function startDashboardUpdates() {
     }, 1000);
 
     if(intervalPing) clearInterval(intervalPing);
-    intervalPing = setInterval(() => { pingStartTime = Date.now(); sendCmd("ping"); }, 2000);
+    intervalPing = setInterval(() => { pingStartTime = Date.now(); sendCmd("ping"); }, 1500);
 
     if(intervalSensors) clearInterval(intervalSensors);
-    intervalSensors = setInterval(() => { sendCmd("get-sys-info"); }, 3000); 
+    intervalSensors = setInterval(() => { sendCmd("get-sys-info"); }, 1000); 
 }
 
 function stopDashboardUpdates() {

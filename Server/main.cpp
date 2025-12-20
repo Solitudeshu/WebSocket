@@ -92,11 +92,30 @@ std::string GetComputerNameStr() {
 std::string GetOSVersionStr() {
     std::string osName = "Unknown Windows";
     HKEY hKey;
+    // Mở khóa Registry chứa thông tin Windows
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+
+        // 1. Lấy tên sản phẩm (ProductName) - Thường trả về "Windows 10 Pro" kể cả trên Win 11
         char productName[255] = { 0 };
         DWORD dataSize = sizeof(productName);
         if (RegQueryValueExA(hKey, "ProductName", nullptr, nullptr, (LPBYTE)productName, &dataSize) == ERROR_SUCCESS) {
             osName = std::string(productName);
+        }
+
+        // 2. [FIX] Lấy số Build (CurrentBuild) để phân biệt Win 10 và 11
+        char buildStr[32] = { 0 };
+        DWORD buildSize = sizeof(buildStr);
+        if (RegQueryValueExA(hKey, "CurrentBuild", nullptr, nullptr, (LPBYTE)buildStr, &buildSize) == ERROR_SUCCESS) {
+            int buildNumber = std::atoi(buildStr);
+
+            // Windows 11 bắt đầu từ Build 22000
+            if (buildNumber >= 22000) {
+                // Tìm chữ "Windows 10" trong tên và sửa thành "Windows 11"
+                size_t pos = osName.find("Windows 10");
+                if (pos != std::string::npos) {
+                    osName.replace(pos, 10, "Windows 11");
+                }
+            }
         }
         RegCloseKey(hKey);
     }

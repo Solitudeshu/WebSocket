@@ -11,7 +11,6 @@
 <body>
     <div id="intro-overlay">
         <div class="intro-card">
-
             <div class="intro-header" id="intro-header-area">
                 <div class="intro-logo">
                     <i data-lucide="link"></i>
@@ -22,34 +21,24 @@
                 </div>
             </div>
 
-            <div id="intro-main-view">
-                <div class="action-buttons">
-                    <button class="btn-gradient-pastel large-btn" id="btnConnectRegistry" onclick="handleIntroScan()">
-                        <i data-lucide="zap"></i> Connect & Discover
-                    </button>
-                </div>
-            </div>
+            <div id="intro-main-view" style="width: 100%; display: flex; flex-direction: column; align-items: center;">
 
-            <div id="intro-scan-view" class="hidden-none">
-                <div class="scan-header-bar">
-                    <h3 style="font-size:1.2rem; display:flex; align-items:center; gap:10px;">
-                        <i data-lucide="loader-2" class="spinning" style="color:#3b82f6"></i>
-                        Discovered Victims
-                    </h3>
-                    <button class="btn-icon-small" onclick="toggleScanView()" title="Back">
-                        <i data-lucide="x"></i>
+                <div class="action-buttons" style="margin-top: 10px; margin-bottom: 20px; width: 100%;">
+                    <button class="btn-gradient-pastel" id="btnConnectRegistry" onclick="handleIntroScan()">
+                        <i data-lucide="zap"></i> Scan Network
                     </button>
                 </div>
 
-                <div style="text-align:left; margin-bottom:10px; color:#64748b;">
-                    <span id="scan-status-text">Fetching list from Registry...</span>
+                <div style="margin-bottom: 10px; color:#64748b; font-size: 0.9rem; min-height: 20px;">
+                    <span id="scan-status-text">Ready to connect...</span>
                 </div>
 
-                <div id="scan-results" class="scan-results-list">
-                </div>
-
-                <div class="scan-footer-actions">
-                    <button class="btn-secondary" onclick="handleIntroScan()">Refresh List</button>
+                <div id="scan-results-wrapper" class="scan-wrapper-integrated">
+                    <div id="scan-results" class="scan-results-list integrated-list">
+                        <div class="scan-placeholder" style="padding: 20px;">
+                            <span style="opacity: 0.5; font-size: 0.9rem;">Server list will appear here</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
