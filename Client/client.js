@@ -809,13 +809,13 @@ function toggleWebcam() {
     if(webcamTimeout) clearTimeout(webcamTimeout);
     webcamTimeout = setTimeout(() => {
         if(isRecording) { showToast("Timeout: No video from server", "error"); resetWebcamUI(); }
-    }, 15000);
+    }, 30000);
 }
 
 function updateBtnText(sec) {
     const btn = document.getElementById("btn-record");
     if(btn) {
-        btn.innerHTML = `<i data-lucide="video" class="btn-icon-inside"></i> Recording... ${sec}s`;
+        btn.innerHTML = `<i data-lucide="video" class="btn-icon-inside"></i> Recording...`;
         if(typeof lucide !== 'undefined') lucide.createIcons();
     }
 }

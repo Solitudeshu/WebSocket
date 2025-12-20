@@ -1,6 +1,7 @@
-#pragma once
+﻿#pragma once
 #include <vector>
+#include <string>
 
-// Khai bao ham quay video
-// Tra ve mang byte chua du lieu video
+// Hàm quay video native dùng Media Foundation
+// Trả về buffer chứa dữ liệu file MP4
 std::vector<char> CaptureWebcam(int durationSeconds);
