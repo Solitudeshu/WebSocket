@@ -1,5 +1,9 @@
 ﻿// =============================================================
-// AURALINK SERVER AGENT
+// AURALINK SERVER AGENT (MAIN.CPP)
+// Nhiệm vụ:
+// 1. Mở WebSocket Server (Port 8080) để nhận lệnh từ Admin
+// 2. Thực thi các module: Keylog, Webcam, Shell, File Manager...
+// 3. Phát tín hiệu UDP Broadcast để báo danh với Registry (Port 8081)
 // =============================================================
 
 // --- 1. CẤU HÌNH & THƯ VIỆN HỆ THỐNG ---

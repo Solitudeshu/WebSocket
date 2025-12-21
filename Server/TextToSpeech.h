@@ -1,26 +1,26 @@
+﻿// =============================================================
+// MODULE: TEXT TO SPEECH (HEADER)
+// Nhiệm vụ: Chuyển đổi văn bản thành giọng nói sử dụng MS SAPI
+// =============================================================
+
 #pragma once
 #include <string>
 #include <thread>
-#include <mutex>
 #include <windows.h>
-#include <sapi.h> // Thu vien Microsoft Speech API
-
-// Link thu vien SAPI va OLE
-#pragma comment(lib, "sapi.lib")
-#pragma comment(lib, "ole32.lib")
+#include <sapi.h> // Microsoft Speech API
 
 class TextToSpeech {
 private:
-    // Ham ho tro chuyen doi UTF-8 (tu Web) sang Wide String (cho Windows)
+    // Chuyển đổi chuỗi UTF-8 (từ Web/Socket) sang Wide String (Windows Unicode)
     std::wstring Utf8ToWstring(const std::string& str);
 
-    // Ham thuc thi viec noi (chay trong thread rieng)
+    // Logic chính: Khởi tạo COM và đọc văn bản (Chạy trên luồng riêng)
     void SpeakLogic(std::string text);
 
 public:
     TextToSpeech();
     ~TextToSpeech();
 
-    // Ham goi tu ben ngoai
+    // Hàm gọi từ bên ngoài (Non-blocking)
     void Speak(const std::string& text);
 };

