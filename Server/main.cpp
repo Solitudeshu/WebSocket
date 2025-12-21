@@ -528,6 +528,9 @@ private:
 // =============================================================
 
 int main() {
+    // Hỗ trợ DPI cao cho màn hình hiện đại
+    SetProcessDPIAware();
+
     auto const address = net::ip::make_address("0.0.0.0");
     unsigned short ws_port = 8080;  // Cổng WebSocket nhận lệnh
     unsigned short udp_port = 8081; // Cổng UDP gửi tín hiệu Discovery
