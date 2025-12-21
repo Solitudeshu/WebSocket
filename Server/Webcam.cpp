@@ -170,7 +170,7 @@ std::vector<char> CaptureWebcam(int durationSeconds) {
             // Kiểm tra thời gian dừng (Chỉ kiểm tra nếu đã bắt đầu quay)
             if (startTick != 0) {
                 LONGLONG currentTick = GetTickCount64();
-                // [FIX] Thêm 500ms buffer để chắc chắn video đủ dài (10.5s -> Player hiển thị 10s)
+                // Thêm 500ms buffer để chắc chắn video đủ dài (10.5s -> Player hiển thị 10s)
                 if ((currentTick - startTick) > (durationSeconds * 1000 + 500)) {
                     break;
                 }
