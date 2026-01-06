@@ -1,14 +1,23 @@
-﻿#include "Process.h"
+﻿// =============================================================
+// MODULE: PROCESS MANAGEMENT (SOURCE)
+// =============================================================
 
-// Link thư viện hệ thống
+#include "Process.h"
+
+// --- LIÊN KẾT THƯ VIỆN HỆ THỐNG (LINKER) ---
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "user32.lib")
-#pragma comment(lib, "shell32.lib") // Quan trọng cho ShellExecute
-
+#pragma comment(lib, "shell32.lib")
 using namespace std;
 
-// --- Helper Fix Lỗi Unicode ---
+Process::Process() { m_isListLoaded = false; }
+
+// =============================================================
+// PHẦN 1: CÁC HÀM TIỆN ÍCH (HELPER FUNCTIONS)
+// =============================================================
+
+// Helper: Chuyển đổi Unicode (WCHAR) sang UTF-8 (std::string)
 string Process::ConvertToString(const WCHAR* wstr) {
     if (!wstr) return "";
     int size = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
@@ -18,63 +27,62 @@ string Process::ConvertToString(const WCHAR* wstr) {
     return str;
 }
 
-Process::Process() { m_isListLoaded = false; }
-
-// --- UTILS ---
+// Helper: Chuyển chuỗi về chữ thường (Lowercase)
 string Process::ToLower(string str) {
     string res = str;
     transform(res.begin(), res.end(), res.begin(), ::tolower);
     return res;
 }
 
+// Helper: Kiểm tra chuỗi có phải là số (PID) hay không
 bool Process::IsNumeric(const string& str) {
     if (str.empty()) return false;
     return all_of(str.begin(), str.end(), ::isdigit);
 }
 
+// Helper: Làm sạch đường dẫn (Xóa dấu ngoặc kép, tham số thừa)
 string Process::CleanPath(const string& rawPath) {
     string s = rawPath;
-    // Xóa khoảng trắng đầu cuối
+    // 1. Xóa khoảng trắng đầu cuối
     size_t first = s.find_first_not_of(" \t\r\n");
     if (string::npos == first) return "";
     size_t last = s.find_last_not_of(" \t\r\n");
     s = s.substr(first, (last - first + 1));
 
-    // Xóa dấu ngoặc kép nếu có
+    // 2. Xóa dấu ngoặc kép nếu có
     s.erase(remove(s.begin(), s.end(), '\"'), s.end());
 
-    // Cắt các tham số sau dấu phẩy (nếu có trong Registry)
+    // 3. Cắt các tham số sau dấu phẩy (thường gặp trong Registry)
     size_t commaPos = s.find(',');
     if (commaPos != string::npos) s = s.substr(0, commaPos);
 
     return s;
 }
 
-// Thay thế hàm GetRegString cũ trong Process.cpp bằng hàm này :
+// Helper: Đọc giá trị String từ Registry (Phiên bản hỗ trợ Unicode)
 string Process::GetRegString(HKEY hKey, const char* valueName) {
-    // 1. Chuyển tên Value (ví dụ "DisplayName") từ char* sang WCHAR* để dùng API Unicode
+    // 1. Chuyển tên Value (ví dụ "DisplayName") từ char* sang WCHAR*
     int len = MultiByteToWideChar(CP_ACP, 0, valueName, -1, NULL, 0);
     if (len <= 0) return "";
     wstring wValueName(len, 0);
     MultiByteToWideChar(CP_ACP, 0, valueName, -1, &wValueName[0], len);
 
-    // 2. Dùng RegQueryValueExW (Phiên bản Unicode) thay vì A
-    WCHAR buffer[4096]; // Tăng buffer lên 4096 để tránh bị tràn với các app tên dài
+    // 2. Dùng RegQueryValueExW (API Unicode) thay vì bản A
+    WCHAR buffer[4096]; // Buffer lớn để tránh tràn với tên App dài
     DWORD size = sizeof(buffer);
     DWORD type;
 
-    // Lưu ý: wValueName.c_str() cắt bỏ ký tự null thừa ở cuối nếu có
     if (RegQueryValueExW(hKey, wValueName.data(), NULL, &type, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
-        // Chỉ lấy dữ liệu dạng chuỗi
+        // Chỉ xử lý dữ liệu dạng chuỗi
         if (type == REG_SZ || type == REG_EXPAND_SZ) {
-            // 3. Quan trọng: Chuyển từ WCHAR (Unicode) sang UTF-8 bằng hàm có sẵn của bạn
+            // 3. Chuyển từ WCHAR (Unicode) sang UTF-8 để sử dụng trong C++
             return ConvertToString(buffer);
         }
     }
     return "";
 }
 
-
+// Helper: Lấy dung lượng RAM sử dụng của Process (MB)
 double Process::GetProcessMemory(DWORD pid) {
     PROCESS_MEMORY_COUNTERS pmc;
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
@@ -87,13 +95,19 @@ double Process::GetProcessMemory(DWORD pid) {
     return 0.0;
 }
 
-// --- REGISTRY SCANNING ---
+// =============================================================
+// PHẦN 2: QUÉT REGISTRY & ỨNG DỤNG (SCANNING)
+// =============================================================
+
+// Quét key Uninstall chuẩn của Windows
 void Process::ScanRegistryKey(HKEY hRoot, const char* subKey) {
     HKEY hUninstall;
     if (RegOpenKeyExA(hRoot, subKey, 0, KEY_READ, &hUninstall) != ERROR_SUCCESS) return;
     char keyName[256];
     DWORD index = 0;
     DWORD keyNameLen = 256;
+
+    // Duyệt qua tất cả các subkey
     while (RegEnumKeyExA(hUninstall, index, keyName, &keyNameLen, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
         HKEY hApp;
         if (RegOpenKeyExA(hUninstall, keyName, 0, KEY_READ, &hApp) == ERROR_SUCCESS) {
@@ -103,7 +117,7 @@ void Process::ScanRegistryKey(HKEY hRoot, const char* subKey) {
 
             if (!name.empty() && !iconPath.empty()) {
                 string exePath = CleanPath(iconPath);
-                // Chỉ lấy nếu là exe
+                // Chỉ lấy nếu là file .exe
                 if (ToLower(exePath).find(".exe") != string::npos) {
                     m_installedApps.push_back({ name, exePath });
                 }
@@ -115,6 +129,7 @@ void Process::ScanRegistryKey(HKEY hRoot, const char* subKey) {
     RegCloseKey(hUninstall);
 }
 
+// Quét key "App Paths" (Nơi đăng ký alias lệnh chạy)
 void Process::ScanAppPaths(HKEY hRoot, const char* subKey) {
     HKEY hAppPaths;
     if (RegOpenKeyExA(hRoot, subKey, 0, KEY_READ, &hAppPaths) != ERROR_SUCCESS)
@@ -137,22 +152,18 @@ void Process::ScanAppPaths(HKEY hRoot, const char* subKey) {
             &ft
         );
 
-        if (res == ERROR_NO_MORE_ITEMS) {
-            break; // duyệt hết
-        }
+        if (res == ERROR_NO_MORE_ITEMS) break; // Hết danh sách
         if (res != ERROR_SUCCESS) {
-            ++index;
-            continue; // lỗi lặt vặt → skip key này
+            ++index; continue; // Skip lỗi
         }
 
-        // Mở subkey: ví dụ "notepad.exe"
+        // Mở subkey (ví dụ "notepad.exe")
         HKEY hEntry;
         if (RegOpenKeyExA(hAppPaths, keyName, 0, KEY_READ, &hEntry) != ERROR_SUCCESS) {
-            ++index;
-            continue;
+            ++index; continue;
         }
 
-        // Đọc default value (tên value = NULL)
+        // Đọc giá trị Default (đường dẫn full)
         char  buffer[1024];
         DWORD size = sizeof(buffer);
         DWORD type = 0;
@@ -161,27 +172,22 @@ void Process::ScanAppPaths(HKEY hRoot, const char* subKey) {
         if (RegQueryValueExA(hEntry, nullptr, nullptr, &type,
             (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
             if (type == REG_SZ || type == REG_EXPAND_SZ) {
-                // buffer đã là chuỗi C kết thúc \0
                 exePath.assign(buffer);
             }
         }
 
         RegCloseKey(hEntry);
 
-        if (exePath.empty()) {
-            ++index;
-            continue;
-        }
+        if (exePath.empty()) { ++index; continue; }
 
-        // Làm sạch path và check .exe
+        // Chuẩn hóa đường dẫn
         exePath = CleanPath(exePath);
         std::string lowerPath = ToLower(exePath);
         if (lowerPath.find(".exe") == std::string::npos) {
-            ++index;
-            continue;
+            ++index; continue;
         }
 
-        // Lấy tên hiển thị từ tên key, VD "notepad.exe" -> "notepad"
+        // Lấy tên hiển thị từ tên Key (vd: "notepad.exe" -> "notepad")
         std::string displayName = keyName;
         std::string lowerKey = ToLower(displayName);
         if (lowerKey.size() > 4 &&
@@ -189,19 +195,17 @@ void Process::ScanAppPaths(HKEY hRoot, const char* subKey) {
             displayName = displayName.substr(0, displayName.size() - 4);
         }
 
-        // Tránh trùng app đã có từ Uninstall: so sánh theo path normalize
+        // Kiểm tra trùng lặp với danh sách Uninstall
         bool exists = false;
         std::string normalizedNew = ToLower(CleanPath(exePath));
         for (const auto& app : m_installedApps) {
             std::string normalizedOld = ToLower(CleanPath(app.path));
             if (normalizedOld == normalizedNew) {
-                exists = true;
-                break;
+                exists = true; break;
             }
         }
 
         if (!exists) {
-            // AppInfo { name, path }
             m_installedApps.push_back({ displayName, exePath });
         }
 
@@ -211,11 +215,11 @@ void Process::ScanAppPaths(HKEY hRoot, const char* subKey) {
     RegCloseKey(hAppPaths);
 }
 
-
+// Hàm Wrapper: Tải toàn bộ danh sách App từ các nguồn
 void Process::LoadInstalledApps() {
     m_installedApps.clear();
 
-    // 1. App cài đặt tiêu chuẩn (có Uninstall)
+    // 1. App cài đặt tiêu chuẩn (Uninstall Keys)
     ScanRegistryKey(HKEY_LOCAL_MACHINE,
         "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall");
     ScanRegistryKey(HKEY_LOCAL_MACHINE,
@@ -223,7 +227,7 @@ void Process::LoadInstalledApps() {
     ScanRegistryKey(HKEY_CURRENT_USER,
         "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall");
 
-    // 2. App có đăng ký App Paths (rất nhiều app hệ thống + user app)
+    // 2. App có đăng ký đường dẫn tắt (App Paths)
     ScanAppPaths(HKEY_LOCAL_MACHINE,
         "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths");
     ScanAppPaths(HKEY_CURRENT_USER,
@@ -232,10 +236,11 @@ void Process::LoadInstalledApps() {
     m_isListLoaded = true;
 }
 
+// =============================================================
+// PHẦN 3: TÌM KIẾM ĐỆ QUY & START MENU (RECURSIVE SEARCH)
+// =============================================================
 
-
-// --- RECURSIVE SEARCH HELPERS ---
-
+// Tìm file đệ quy trong thư mục
 string Process::FindFileRecursive(string directory, string fileToFind) {
     string searchPath = directory + "\\*";
     WIN32_FIND_DATAA findData;
@@ -262,7 +267,7 @@ string Process::FindFileRecursive(string directory, string fileToFind) {
         }
         else {
             string lowerName = ToLower(currentName);
-            // Logic tìm kiếm: Tên file chứa từ khóa VÀ phải là .exe hoặc .lnk (shortcut)
+            // Logic: Tên file chứa từ khóa VÀ phải là .exe hoặc .lnk (shortcut)
             if (lowerName.find(lowerFind) != string::npos) {
                 if (lowerName.find(".lnk") != string::npos || lowerName.find(".exe") != string::npos) {
                     resultPath = fullPath;
@@ -276,11 +281,12 @@ string Process::FindFileRecursive(string directory, string fileToFind) {
     return resultPath;
 }
 
+// Tìm ứng dụng trong các thư mục Start Menu/Desktop
 string Process::FindAppInStartMenu(string appName) {
     char path[MAX_PATH];
     string foundPath = "";
 
-    // Các folder Start Menu phổ biến
+    // Các vị trí phổ biến của Shortcut
     vector<int> foldersToCheck = {
         CSIDL_COMMON_PROGRAMS, // Start Menu (All Users)
         CSIDL_PROGRAMS,        // Start Menu (Current User)
@@ -296,36 +302,38 @@ string Process::FindAppInStartMenu(string appName) {
     return "";
 }
 
-// --- START PROCESS (CORE LOGIC) ---
+// =============================================================
+// PHẦN 4: LOGIC KHỞI CHẠY (CORE START LOGIC)
+// =============================================================
+
 bool Process::StartProcess(const string& nameOrPath) {
     if (nameOrPath.empty()) return false;
     string input = ToLower(nameOrPath);
 
-    // Xử lý cắt đuôi .exe nếu người dùng nhập (ví dụ "discord.exe" -> "discord")
+    // Xử lý cắt đuôi .exe nếu có (ví dụ "discord.exe" -> "discord")
     string searchName = input;
     if (searchName.length() > 4 && searchName.substr(searchName.length() - 4) == ".exe") {
         searchName = searchName.substr(0, searchName.length() - 4);
     }
 
-    // --- TH1: Thử chạy trực tiếp (Hệ thống hoặc đường dẫn đầy đủ) ---
+    // --- TRƯỜNG HỢP 1: Chạy trực tiếp (Direct Execution) ---
     // Ví dụ: "calc", "notepad", "C:\\Windows\\System32\\cmd.exe"
-    // Nếu > 32 là thành công
     HINSTANCE res = ShellExecuteA(NULL, "open", nameOrPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
     if ((intptr_t)res > 32) return true;
 
-    // --- TH2: Tìm trong danh sách Registry đã load ---
+    // --- TRƯỜNG HỢP 2: Tìm trong Registry (Installed Apps) ---
     if (!m_isListLoaded) LoadInstalledApps();
 
     for (const auto& app : m_installedApps) {
-        // So sánh tên hiển thị hoặc đường dẫn
+        // So sánh tên hiển thị hoặc đường dẫn cài đặt
         if (ToLower(app.name).find(searchName) != string::npos || ToLower(app.path).find(searchName) != string::npos) {
             HINSTANCE res = ShellExecuteA(NULL, "open", app.path.c_str(), NULL, NULL, SW_SHOWNORMAL);
             if ((intptr_t)res > 32) return true;
         }
     }
 
-    // --- TH3: Tìm đệ quy trong Start Menu (Fallback cuối cùng) ---
-    // Discord và các app cài User thường nằm ở đây dưới dạng shortcut
+    // --- TRƯỜNG HỢP 3: Tìm đệ quy trong Start Menu (Fallback) ---
+    // Các app User Mode (như Discord) thường nằm ở đây dưới dạng shortcut
     string shortcutPath = FindAppInStartMenu(searchName);
     if (!shortcutPath.empty()) {
         // Chạy file .lnk hoặc .exe tìm được
@@ -336,8 +344,12 @@ bool Process::StartProcess(const string& nameOrPath) {
     return false;
 }
 
-// --- STOP & LIST PROCESS ---
+// =============================================================
+// PHẦN 5: DỪNG & LIỆT KÊ TIẾN TRÌNH (STOP & LIST)
+// =============================================================
+
 string Process::StopProcess(const string& nameOrPid) {
+    // 1. Nếu input là số -> Dừng theo PID
     if (IsNumeric(nameOrPid)) {
         DWORD pid = stoul(nameOrPid);
         HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
@@ -348,6 +360,7 @@ string Process::StopProcess(const string& nameOrPid) {
         return "Err: Cannot kill PID " + nameOrPid;
     }
 
+    // 2. Nếu input là chữ -> Dừng theo tên (Kill tất cả process cùng tên)
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnap == INVALID_HANDLE_VALUE) return "Err Snapshot";
 
@@ -372,6 +385,8 @@ string Process::StopProcess(const string& nameOrPid) {
 string Process::ListProcesses() {
     stringstream ss;
     ss << "PID\tRAM(MB)\tThreads\tName\n";
+
+    // Tạo Snapshot hệ thống
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnap == INVALID_HANDLE_VALUE) return "Err Snapshot";
 

