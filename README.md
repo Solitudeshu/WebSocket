@@ -1,4 +1,4 @@
-# AuraLink - Remote Administration Tool (RAT)
+# WebSocket-based LAN Remote Administration System
 
 ![Project Status](https://img.shields.io/badge/Status-Completed-success)
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue)
@@ -10,20 +10,52 @@
 > **Khoa:** Công nghệ Thông tin  
 > **Năm học:** 2025 - 2026
 
-## 📖 Giới thiệu (Overview)
+## 📖 Giới thiệu 
 
-**AuraLink** là hệ thống điều khiển và giám sát máy tính từ xa trong mạng nội bộ (LAN), được xây dựng dựa trên giao thức **WebSocket** để đảm bảo tốc độ truyền tải thời gian thực (Real-time). Hệ thống sử dụng mô hình Client-Server kết hợp với cơ chế tự động phát hiện thiết bị (Service Discovery) qua UDP.
+Dự án là một hệ thống **Remote Administration Tool (RAT)** hoạt động trong mạng nội bộ (LAN), cho phép người quản trị giám sát và điều khiển máy tính trạm thông qua giao diện Web. Hệ thống giải quyết bài toán truyền tải dữ liệu thời gian thực (Real-time) bằng giao thức **WebSocket**, khắc phục độ trễ của phương pháp HTTP Polling truyền thống.
 
 ### Cấu trúc dự án
-Dựa trên mã nguồn hiện tại, dự án được chia thành 3 thành phần chính:
 
-1.  **`Server/` (Agent):** Chương trình chạy trên máy nạn nhân (Target). Được viết bằng C++ sử dụng **Visual Studio**, chịu trách nhiệm thực thi lệnh, quay màn hình, keylog và gửi dữ liệu về Dashboard.
-2.  **`Client/` (Dashboard):** Giao diện điều khiển chạy trên trình duyệt Web (HTML/CSS/JS). Kết nối trực tiếp tới Agent hoặc thông qua Registry Server.
-3.  **`Register/` (Discovery Server):** Server trung gian viết bằng C++, giúp Admin tự động tìm kiếm IP của các máy đang chạy Agent trong mạng LAN.
+Dự án bao gồm 3 thành phần:
+1.  **Agent (Server):** Ứng dụng C++ chạy ngầm trên máy trạm.
+2.  **Dashboard (Client):** Giao diện Web HTML/JS để điều khiển.
+3.  **Discovery Service (Register):** Server trung gian hỗ trợ tìm kiếm thiết bị tự động.
+---
+
+## 👥 Thành viên thực hiện
+
+| STT | MSSV | Họ và Tên |
+| :-: | :--- | :--- | 
+| 1 | **24120256** | **Hồ Ngọc Lan Anh** | 
+| 2 | **24120498** | **Phan Minh Anh** | 
+| 3 | **24120501** | **Nguyễn Lê Thanh Huy** | 
+
+**Giáo viên hướng dẫn:** ThS. Đỗ Hoàng Cường
 
 ---
 
-## ✨ Tính năng (Features)
+## 🛠️ Công nghệ & Kỹ thuật (Technical Stack)
+
+Hệ thống được xây dựng dựa trên các công nghệ và thư viện kỹ thuật cao để đảm bảo hiệu năng và tính tương thích trên Windows.
+
+### Backend (C++ Agent)
+| Thành phần | Công nghệ / Thư viện | Mô tả kỹ thuật |
+| :--- | :--- | :--- |
+| **Network Core** | **Boost.Beast** & **Boost.Asio** | Xử lý kết nối WebSocket bất đồng bộ (Async I/O), đảm bảo hiệu năng cao khi xử lý đa luồng. |
+| **Media** | **Microsoft Media Foundation** | Thay thế DirectShow/OpenCV để truy xuất Webcam ở mức thấp (Low-level), encode video sang H.264/MP4. |
+| **System API** | **Windows API (Win32)** | Sử dụng `GDI` để chụp màn hình, `Toolhelp32Snapshot` để quản lý tiến trình/ứng dụng. |
+| **Input Capture** | **Windows Hooks** (`SetWindowsHookEx`) | Bắt sự kiện bàn phím toàn cục, xử lý logic bộ gõ tiếng Việt (Telex/VNI) và Unicode. |
+| **Audio** | **Microsoft SAPI** (`ISpVoice`) | Tích hợp Text-to-Speech để phát âm thanh thông báo trên máy trạm. |
+| **Encryption** | **Crypt32** | Mã hóa dữ liệu nhị phân (Ảnh/Video/File) sang Base64 để truyền qua WebSocket Text Frame. |
+
+### Frontend (Dashboard)
+* **Core:** HTML5, CSS3 (Glassmorphism UI), Vanilla JavaScript.
+* **Rendering:** Sử dụng HTML5 Canvas để vẽ luồng ảnh chụp màn hình và Video tag để phát stream webcam.
+* **Connectivity:** WebSocket API chuẩn của trình duyệt.
+
+---
+
+## ✨ Tính năng 
 
 Hệ thống cung cấp các công cụ quản trị mạnh mẽ đã được kiểm thử trong môi trường LAN:
 
@@ -34,23 +66,19 @@ Hệ thống cung cấp các công cụ quản trị mạnh mẽ đã được k
 * **📊 System Monitor:** Theo dõi thông tin hệ thống, danh sách tiến trình (Process) và ứng dụng (Application).
 * **📁 File Explorer:** Duyệt cây thư mục, ổ đĩa và tải tệp tin (Download) từ máy trạm.
 * **📋 Clipboard Manager:** Giám sát và lấy nội dung Clipboard (Text).
-* **🗣️ Text-to-Speech:** Gửi văn bản từ Admin và phát âm thanh (chị Google) trên máy trạm.
+* **🗣️ Text-to-Speech:** Gửi văn bản từ Admin và phát âm thanh trên máy trạm.
 * **⚙️ Power Control:** Điều khiển tắt máy (Shutdown) hoặc khởi động lại (Restart) từ xa.
 
 ---
 
-## 🛠️ Yêu cầu hệ thống (Prerequisites)
+## 🛠️ Yêu cầu hệ thống
 
-Để biên dịch và chạy dự án, bạn cần chuẩn bị:
-
-* **Hệ điều hành:** Windows 10 hoặc Windows 11.
-* **IDE:** Visual Studio 2019 hoặc 2022 (có cài đặt workload "Desktop development with C++").
-* **Thư viện:** [Boost C++ Libraries](https://www.boost.org/) (Phiên bản mới nhất).
-    * *Lưu ý:* Cần cấu hình đường dẫn `Include Directories` và `Library Directories` tới thư mục Boost trong Project Properties của Visual Studio.
+* **IDE:** Visual Studio 2019/2022.
+* **Thư viện:** Boost C++ (yêu cầu cấu hình đường dẫn Include/Library trong Project Settings).
 
 ---
 
-## 🚀 Hướng dẫn cài đặt & Build (Installation)
+## 🚀 Hướng dẫn cài đặt & Build
 
 ### 1. Build Server (Agent)
 Đây là chương trình chạy ngầm trên máy cần điều khiển.
@@ -67,32 +95,13 @@ Server trung gian để tìm kiếm IP.
 1.  Truy cập thư mục `Register/`.
 2.  Mở file giải pháp **`Register.sln`** bằng Visual Studio.
 3.  Build tương tự như Server (chế độ Release/x64).
-4.  Chạy `Register.exe` trên máy Admin (hoặc một máy chủ trong mạng).
+4.  Chạy `Register.exe` trên máy Admin.
 
 ### 3. Chạy Client (Dashboard)
 Giao diện điều khiển không cần biên dịch.
 
 1.  Truy cập thư mục `Client/`.
 2.  Mở file **`index.html`** bằng trình duyệt web hiện đại (Chrome, Edge, Firefox).
-3.  Nhập IP của máy Agent (hoặc dùng tính năng **Scan Network** nếu đã chạy Register) để kết nối.
+3.  Nhấn **Scan Network** và chọn máy Server để kết nối.
 
 ---
-
-## 👥 Thành viên thực hiện (Contributors)
-
-| STT | MSSV | Họ và Tên | Vai trò chính |
-| :-: | :--- | :--- | :--- |
-| 1 | **24120256** | **Hồ Ngọc Lan Anh** | Frontend Dev, UI/UX, Báo cáo |
-| 2 | **24120498** | **Phan Minh Anh** | Backend Dev (Core, Keylogger), Network |
-| 3 | **24120501** | **Nguyễn Lê Thanh Huy** | Backend Dev (System, Media), Discovery |
-
-**Giáo viên hướng dẫn:** ThS. Đỗ Hoàng Cường
-
----
-
-## ⚠️ Khước từ trách nhiệm (Disclaimer)
-
-> Dự án này được phát triển **dành riêng cho mục đích học tập và nghiên cứu** trong khuôn khổ môn học Mạng Máy Tính tại trường ĐH Khoa học Tự nhiên. Nhóm tác giả không chịu trách nhiệm cho bất kỳ hành vi sử dụng mã nguồn này vào mục đích xâm phạm quyền riêng tư hoặc vi phạm pháp luật. Vui lòng chỉ thử nghiệm trên các thiết bị mà bạn sở hữu hoặc được sự cho phép.
-
----
-© 2026 AuraLink Project.
