@@ -1,105 +1,94 @@
-# WebSocket-based LAN Remote Administration System
+# CSC10008 WebSocket-based LAN Remote Administration System - AuraLink 
 
-![Project Status](https://img.shields.io/badge/Status-Completed-success)
-![Platform](https://img.shields.io/badge/Platform-Windows-blue)
-![Language](https://img.shields.io/badge/Language-C%2B%2B%20%7C%20Visual_Studio-purple)
-![Frontend](https://img.shields.io/badge/Frontend-HTML5%20%2F%20JS-orange)
+**Course:** Computer Networks  
+**Institution:** University of Science, VNU-HCM  
+**Faculty:** Faculty of Information Technology (FIT)  
 
-> **Đồ án môn học:** Mạng Máy Tính  
-> **Trường:** Đại học Khoa học Tự nhiên, ĐHQG-HCM  
-> **Khoa:** Công nghệ Thông tin  
-> **Năm học:** 2025 - 2026
+## Student Information
 
-## 📖 Giới thiệu 
+* 24120498 - Phan Minh Anh
+* 24120256 - Ho Ngoc Lan Anh
+* 24120501 - Nguyen Le Thanh Huy
 
-Dự án là một hệ thống **Remote Administration Tool (RAT)** hoạt động trong mạng nội bộ (LAN), cho phép người quản trị giám sát và điều khiển máy tính trạm thông qua giao diện Web. Hệ thống giải quyết bài toán truyền tải dữ liệu thời gian thực (Real-time) bằng giao thức **WebSocket**, khắc phục độ trễ của phương pháp HTTP Polling truyền thống.
+**Instructor:** MSc. Do Hoang Cuong
 
-### Cấu trúc dự án
+## Introduction
 
-Dự án bao gồm 3 thành phần:
-1.  **Agent (Server):** Ứng dụng C++ chạy ngầm trên máy trạm.
-2.  **Dashboard (Client):** Giao diện Web HTML/JS để điều khiển.
-3.  **Discovery Service (Register):** Server trung gian hỗ trợ tìm kiếm thiết bị tự động.
----
+AuraLink is a Remote Administration Tool (RAT) designed to operate within a Local Area Network (LAN), allowing administrators to seamlessly monitor and control client workstations through a centralized web interface. The system leverages the WebSocket protocol to enable real-time bidirectional data transmission, effectively overcoming the latency limitations inherent to traditional HTTP Polling methods.
 
-## 👥 Thành viên thực hiện
+### System Architecture
 
-| STT | MSSV | Họ và Tên |
-| :-: | :--- | :--- | 
-| 1 | **24120256** | **Hồ Ngọc Lan Anh** | 
-| 2 | **24120498** | **Phan Minh Anh** | 
-| 3 | **24120501** | **Nguyễn Lê Thanh Huy** | 
-
-**Giáo viên hướng dẫn:** ThS. Đỗ Hoàng Cường
+The project is composed of three primary components:
+1. **Agent (Server):** A background C++ application executed on the target client workstation.
+2. **Dashboard (Client):** An HTML/JS web-based interface used by the administrator for control and monitoring.
+3. **Discovery Service (Registry):** An intermediary server that facilitates automatic device discovery and IP mapping within the network.
 
 ---
 
-## 🛠️ Công nghệ & Kỹ thuật (Technical Stack)
+## Technical Stack
 
-Hệ thống được xây dựng dựa trên các công nghệ và thư viện kỹ thuật cao để đảm bảo hiệu năng và tính tương thích trên Windows.
+The system is built utilizing advanced technologies and libraries to ensure high performance and seamless compatibility on Windows environments.
 
 ### Backend (C++ Agent & Registry)
-* **Ngôn ngữ:** C++ (từ C++14 trở lên).
-* **Network Library:** Boost.Beast & Boost.Asio (Xử lý WebSocket & Async I/O).
+* **Language:** C++ (C++14 and above).
+* **Network Library:** Boost.Beast & Boost.Asio (for WebSocket handling and Asynchronous I/O).
 * **System Core:** Windows API (Win32 API).
-* **Multimedia:** Microsoft Media Foundation (Xử lý Camera), Microsoft GDI (Xử lý hình ảnh).
-* **Audio/Speech:** Microsoft SAPI (Text-to-Speech).
-* **Cryptography:** Windows Cryptography API (Xử lý mã hóa dữ liệu Base64).
+* **Multimedia:** Microsoft Media Foundation (Webcam streaming), Microsoft GDI (Image processing).
+* **Audio/Speech:** Microsoft SAPI (Text-to-Speech synthesis).
+* **Cryptography:** Windows Cryptography API (Base64 data encoding/decoding).
 
 ### Frontend (Dashboard)
-* **Core:** HTML5, CSS3, JavaScript (Vanilla).
-* **Communication:** WebSocket API chuẩn.
-* **UI Design:** Glassmorphism Style.
+* **Core:** HTML5, CSS3, Vanilla JavaScript.
+* **Communication:** Standard WebSocket API.
+* **UI Design:** Glassmorphism Design System.
 
 ---
 
-## ✨ Tính năng 
+## Features
 
-Hệ thống cung cấp các công cụ quản trị mạnh mẽ đã được kiểm thử trong môi trường LAN:
+The system provides a robust set of administrative tools, thoroughly tested in a LAN environment:
 
-* **🔍 Auto Discovery:** Tự động quét và hiển thị danh sách các máy đang hoạt động (Online) trong mạng.
-* **📷 Webcam Streaming:** Xem hình ảnh trực tiếp từ webcam của máy trạm (sử dụng Media Foundation).
-* **⌨️ Keylogger:** Ghi lại phím bấm, hỗ trợ đầy đủ tiếng Việt (Telex/VNI) và xử lý Unicode.
-* **📸 Screenshot:** Chụp ảnh màn hình máy trạm và gửi về Dashboard theo thời gian thực.
-* **📊 System Monitor:** Theo dõi thông tin hệ thống, danh sách tiến trình (Process) và ứng dụng (Application).
-* **📁 File Explorer:** Duyệt cây thư mục, ổ đĩa và tải tệp tin (Download) từ máy trạm.
-* **📋 Clipboard Manager:** Giám sát và lấy nội dung Clipboard (Text).
-* **🗣️ Text-to-Speech:** Gửi văn bản từ Admin và phát âm thanh trên máy trạm.
-* **⚙️ Power Control:** Điều khiển tắt máy (Shutdown) hoặc khởi động lại (Restart) từ xa.
-
----
-
-## 🛠️ Yêu cầu hệ thống
-
-* **IDE:** Visual Studio 2019/2022.
-* **Thư viện:** Boost C++ (yêu cầu cấu hình đường dẫn Include/Library trong Project Settings).
+* **Auto Discovery:** Automatically scans the network and displays a list of currently online client machines.
+* **Webcam Streaming:** Captures and streams live video from the client's webcam using Media Foundation.
+* **Keylogger:** Records keystrokes in real-time, featuring full support for Vietnamese input (Telex/VNI) and Unicode processing.
+* **Screenshot:** Captures the client's screen and transmits the image to the Dashboard in real-time.
+* **System Monitor:** Tracks real-time system metrics and retrieves active processes and applications.
+* **File Explorer:** Navigates the client's directory tree, drives, and supports remote file downloading.
+* **Clipboard Manager:** Monitors and retrieves text content from the client's clipboard.
+* **Text-to-Speech:** Allows the administrator to send text messages that are synthesized and played as audio on the client machine.
+* **Power Control:** Remotely executes system shutdown or restart commands.
 
 ---
 
-## 🚀 Hướng dẫn cài đặt & Build
+## System Requirements
 
-### 1. Build Server (Agent)
-Đây là chương trình chạy ngầm trên máy cần điều khiển.
-
-1.  Truy cập thư mục `Server/`.
-2.  Mở file giải pháp **`Server.sln`** bằng Visual Studio.
-3.  Đảm bảo cấu hình Build là **Release** và **x64**.
-4.  Nhấn `Ctrl + Shift + B` để Build Solution.
-5.  File thực thi `Server.exe` sẽ nằm trong thư mục `x64/Release/`.
-
-### 2. Build Registry (Discovery Server)
-Server trung gian để tìm kiếm IP.
-
-1.  Truy cập thư mục `Register/`.
-2.  Mở file giải pháp **`Register.sln`** bằng Visual Studio.
-3.  Build tương tự như Server (chế độ Release/x64).
-4.  Chạy `Register.exe` trên máy Admin.
-
-### 3. Chạy Client (Dashboard)
-Giao diện điều khiển không cần biên dịch.
-
-1.  Truy cập thư mục `Client/`.
-2.  Mở file **`index.html`** bằng trình duyệt web hiện đại (Chrome, Edge, Firefox).
-3.  Nhấn **Scan Network** và chọn máy Server để kết nối.
+* **IDE:** Visual Studio 2019 or 2022.
+* **Dependencies:** Boost C++ Libraries (Requires proper configuration of Include and Library paths in the Visual Studio Project Settings).
 
 ---
+
+## Installation and Build Instructions
+
+### 1. Build the Server (Agent)
+This is the background application that runs on the target machine you wish to control.
+
+1. Navigate to the `Server/` directory.
+2. Open the solution file **`Server.sln`** using Visual Studio.
+3. Ensure the Build Configuration is set to **Release** and the platform is **x64**.
+4. Press `Ctrl + Shift + B` to build the solution.
+5. The compiled executable `Server.exe` will be generated in the `x64/Release/` directory.
+
+### 2. Build the Registry (Discovery Server)
+This is the intermediary server responsible for network IP discovery.
+
+1. Navigate to the `Register/` directory.
+2. Open the solution file **`Register.sln`** using Visual Studio.
+3. Build the project using the same configuration as the Server (**Release / x64**).
+4. Run the compiled `Register.exe` on the Administrator's machine.
+
+### 3. Run the Client (Dashboard)
+The web-based control interface does not require compilation.
+
+1. Navigate to the `Client/` directory.
+2. Open the **`index.html`** file using any modern web browser (e.g., Google Chrome, Microsoft Edge, Mozilla Firefox).
+3. Click the **Scan Network** button to discover devices, then select a target Server to establish the WebSocket connection.
