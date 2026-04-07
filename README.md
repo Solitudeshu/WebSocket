@@ -10,7 +10,7 @@
 * 24120256 - Ho Ngoc Lan Anh
 * 24120501 - Nguyen Le Thanh Huy
 
-**Instructor:** MSc. Do Hoang Cuong
+**Instructor:** PhD. Do Hoang Cuong
 
 ## Introduction
 
